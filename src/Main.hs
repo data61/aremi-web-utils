@@ -7,12 +7,13 @@ import           Web.Scotty
 
 import           Data.Default               (def)
 
-import           Control.Applicative        (Applicative)
+import           Control.Applicative
 import           Control.Monad              (when)
 import           Data.Monoid                (mconcat)
 
 import           Data.Time.Calendar         (Day, fromGregorian)
-import           Data.Time.Format           (formatTime)
+import           Data.Time.Format           (formatTime, parseTime)
+import           Data.Time.LocalTime        (LocalTime)
 import           System.Locale              (defaultTimeLocale)
 
 import           Control.Lens               as L
@@ -20,12 +21,15 @@ import           Data.Aeson                 as A
 import           Data.Aeson.Lens            as AL
 import           Data.Text.Lens
 
-import           Data.Text                  as T
+import           Text.Read                  (readMaybe)
 
-import           Network.HTTP.Conduit       (simpleHttp)
+-- import           Data.ByteString.Lazy       (ByteString)
+import qualified Data.ByteString.Lazy       as BSL
+import           Data.Text                  (Text)
+-- import qualified Data.Text                  as T
 
-import           Control.Exception          (SomeException)
-import           Control.Monad.Catch        (catch)
+-- import           Network.HTTP.Conduit       (simpleHttp)
+
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Either
 
@@ -37,8 +41,15 @@ main = do
     -- print js
     case js of
         Left str -> putStrLn str
-        Right v -> print $ v ^.. getKeyedSeries "contribution" "nsw"
-                                 . _String . unpacked . to (read :: String -> Double)
+        Right v -> do
+            let vs = v ^.. key "contribution" . values
+            print $ (v ^.. getKeyedSeries "contribution" "nsw"
+                            . _String . unpacked
+                            -- . _Show
+                            . to readMaybe
+                            :: [Maybe Double])
+            mapM_ print $ getTS "nsw" vs
+                                 -- . to (read :: String -> Double)
 
 
 
@@ -71,3 +82,11 @@ getKeyedSeries :: (AsValue t, Applicative f)
                 => Text -> Text
                 -> (Value -> f Value) -> t -> f t
 getKeyedSeries dataset ky = key dataset . values . key ky
+
+
+getTS :: Text -> [Value] -> [Maybe (LocalTime, Double)]
+getTS state objs =
+    let timeParser = parseTime defaultTimeLocale "%FT%H:%M:%SZ"
+        timeLens   = key "ts" . _String . unpacked . to timeParser . _Just
+        stateLens  = key state . _String . unpacked . _Show
+    in Prelude.map (\v -> (,) <$> v ^? timeLens <*> v ^? stateLens) objs
