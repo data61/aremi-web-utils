@@ -57,8 +57,9 @@ fetchDate day = do
     let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
     liftIO $ print url
 
-    bs <- liftIO (simpleHttp url)
-        `catch` (\e -> left . show $ (e :: SomeException))
+    -- bs <- liftIO (simpleHttp url)
+        -- `catch` (\e -> left . show $ (e :: SomeException))
+    bs <- liftIO $ BSL.readFile "snapshot.json"
 
 
     hoistEither $ eitherDecode' bs
