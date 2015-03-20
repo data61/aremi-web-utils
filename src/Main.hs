@@ -14,14 +14,13 @@ import           Control.Monad                             (forM, forM_)
 import           Data.Monoid                               ((<>))
 
 import           Data.Time.Calendar                        (Day, fromGregorian)
+import           Data.Time.Clock                           (UTCTime)
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
 import           Data.Time.LocalTime                       (LocalTime, TimeZone,
-                                                            timeZoneName,
                                                             getCurrentTimeZone,
-                                                            utcToLocalTime,
-                                                            localTimeToUTC,
-                                                            utc)
+                                                            timeZoneName,
+                                                            utcToLocalTime)
 import           System.Locale                             (defaultTimeLocale)
 
 import           Control.Lens                              as L
@@ -63,7 +62,7 @@ main = do
         Left str -> putStrLn str >> return Nothing
         Right v -> do
             let vs = v ^.. key "contribution" . values
-                allStates :: [(Text,[Maybe (LocalTime,Double)])]
+                allStates :: [(Text,[Maybe (UTCTime,Double)])]
                 allStates = map (\name -> (name, getTS _Show name vs)) states
             (allsvg,_) <- renderableToSVGString (createContributionChart tz "All states contribution" allStates) 800 400
             ssvgs <- forM states $ \sname -> do
@@ -107,7 +106,7 @@ getKeyedSeries dataset ky = key dataset . values . key ky
 
 
 getTS :: (Read a, Show a)
-      => Prism' String a -> Text -> [Value] -> [Maybe (LocalTime, a)]
+      => Prism' String a -> Text -> [Value] -> [Maybe (UTCTime, a)]
 getTS f state objs =
     let timeParser = parseTime defaultTimeLocale "%FT%H:%M:%SZ"
         timeLens   = key "ts" . _String . unpacked . to timeParser . _Just
@@ -127,7 +126,7 @@ colours = map (opaque . sRGB24read) [
     "#4D4D4D",
     "#F15854"]
 
-createContributionChart :: TimeZone -> Text -> [(Text,[Maybe (LocalTime,Double)])] -> Renderable ()
+createContributionChart :: TimeZone -> Text -> [(Text,[Maybe (UTCTime,Double)])] -> Renderable ()
 createContributionChart tz title vss =
  -- toFile def file $
  toRenderable $
@@ -153,6 +152,6 @@ createContributionChart tz title vss =
                 plot_lines_style . line_color .= colour
                 plot_lines_style . line_width .= 3
     where
-        utcToLocal :: LocalTime -> LocalTime
-        utcToLocal lt = utcToLocalTime tz (localTimeToUTC utc lt)
+        utcToLocal :: UTCTime -> LocalTime
+        utcToLocal lt = utcToLocalTime tz lt -- (localTimeToUTC utc lt)
 
