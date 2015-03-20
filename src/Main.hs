@@ -43,6 +43,7 @@ import           Control.Monad.Trans.Either
 -- Chart stuff
 import           Graphics.Rendering.Chart.Backend.Diagrams
 import           Graphics.Rendering.Chart.Easy
+import Data.Colour.SRGB (sRGB24read)
 
 states :: [Text]
 states = ["nsw", "vic", "qld", "sa", "tas"]
@@ -106,16 +107,35 @@ getTS f state objs =
         stateLens  = key state . _String . unpacked . f
     in sortBy (comparing (fmap fst)) $ Prelude.map (\v -> (,) <$> v ^? timeLens <*> v ^? stateLens) objs
 
+-- From http://www.mulinblog.com/a-color-palette-optimized-for-data-visualization/
+colours :: [AlphaColour Double]
+colours = map (opaque . sRGB24read) [
+    "#4D4D4D",
+    "#5DA5DA",
+    "#FAA43A",
+    "#60BD68",
+    "#F17CB0",
+    "#B2912F",
+    "#B276B2",
+    "#DECF3F",
+    "#F15854"]
 
-createContributionChart :: [(Text,[Maybe (LocalTime,Double)])] -> Renderable ()
-createContributionChart vss =
+createContributionChart :: Text -> [(Text,[Maybe (LocalTime,Double)])] -> Renderable ()
+createContributionChart title vss =
  -- toFile def file $
  toRenderable $
     do
-      layout_title .= "Contribution"
+      layout_title .= (unpack title)
       layout_background .= solidFillStyle (opaque white)
       layout_foreground .= (opaque black)
       layout_left_axis_visibility . axis_show_ticks .= False
+      setColors colours
+
 
       forM_ vss $ \(name,vs) ->
-          plot (line (unpack name) [ [ (d,v) | Just (d,v) <- vs] ] )
+          plot . liftEC $ do
+                colour <- takeColor
+                plot_lines_title .= (unpack name)
+                plot_lines_values .= [ [ (d,v) | Just (d,v) <- vs] ]
+                plot_lines_style . line_color .= colour
+                plot_lines_style . line_width .= 3
