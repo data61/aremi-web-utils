@@ -93,7 +93,7 @@ fetchDate day = do
 
     -- bs <- liftIO (simpleHttp url)
         -- `catch` (\e -> left . show $ (e :: SomeException))
-    bs <- liftIO $ BSL.readFile "snapshot2.json"
+    bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
 
     hoistEither $ A.eitherDecode' bs
 
