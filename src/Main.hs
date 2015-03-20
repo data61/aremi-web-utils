@@ -51,7 +51,7 @@ import           Graphics.Rendering.Chart.Backend.Diagrams
 import           Graphics.Rendering.Chart.Easy
 
 states :: [Text]
-states = ["nsw", "vic", "qld", "sa", "tas"]
+states = ["nsw", "vic", "qld", "sa", "tas","wa"]
 
 main :: IO ()
 main = do
