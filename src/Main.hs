@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Rank2Types        #-}
 
@@ -30,7 +31,7 @@ import           Data.Aeson.Lens                           as AL
 import           Data.Text.Lens
 
 -- import           Data.ByteString.Lazy                      (ByteString)
-import qualified Data.ByteString.Lazy                      as BSL
+-- import qualified Data.ByteString.Lazy                      as BSL
 import           Data.Text                                 (Text, unpack)
 import qualified Data.Text                                 as T
 
@@ -64,13 +65,17 @@ main = do
             let vs = v ^.. key "contribution" . values
                 allStates :: [(Text,[Maybe (UTCTime,Double)])]
                 allStates = map (\name -> (name, getTS _Show name vs)) states
-            (allsvg,_) <- renderableToSVGString (createContributionChart tz "All states contribution" allStates) 800 400
+                allChart = createContributionChart tz "All states contribution" allStates
+
+            (!allsvg,_) <- renderableToSVGString allChart 800 400
+
             ssvgs <- forM states $ \sname -> do
                     let title = T.toUpper sname <> " contribution (%)"
-                    (ssvg,_) <- renderableToSVGString (createContributionChart tz title [(sname,getTS _Show sname vs)]) 800 400
+                        chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
+                    (!ssvg,_) <- renderableToSVGString chart 800 400
                     return (sname,ssvg)
 
-            return . Just . H.fromList $ ("all",allsvg):ssvgs
+            return . Just $! H.fromList $ ("all",allsvg):ssvgs
 
     scottyOpts def $ do
         get ( "/contribution/:state/svg") $ do
@@ -111,7 +116,9 @@ getTS f state objs =
     let timeParser = parseTime defaultTimeLocale "%FT%H:%M:%SZ"
         timeLens   = key "ts" . _String . unpacked . to timeParser . _Just
         stateLens  = key state . _String . unpacked . f
-    in sortBy (comparing (fmap fst)) $ Prelude.map (\v -> (,) <$> v ^? timeLens <*> v ^? stateLens) objs
+    in sortBy (comparing (fmap fst))
+       . Prelude.map (\v -> (,) <$> v ^? timeLens <*> v ^? stateLens)
+       $ objs
 
 -- From http://www.mulinblog.com/a-color-palette-optimized-for-data-visualization/
 colours :: [AlphaColour Double]
