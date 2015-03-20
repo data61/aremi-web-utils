@@ -46,9 +46,9 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Either
 
 -- Chart stuff
+import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Backend.Diagrams
 import           Graphics.Rendering.Chart.Easy
-import Data.Colour.SRGB (sRGB24read)
 
 states :: [Text]
 states = ["nsw", "vic", "qld", "sa", "tas"]
@@ -117,7 +117,6 @@ getTS f state objs =
 -- From http://www.mulinblog.com/a-color-palette-optimized-for-data-visualization/
 colours :: [AlphaColour Double]
 colours = map (opaque . sRGB24read) [
-    "#4D4D4D",
     "#5DA5DA",
     "#FAA43A",
     "#60BD68",
@@ -125,6 +124,7 @@ colours = map (opaque . sRGB24read) [
     "#B2912F",
     "#B276B2",
     "#DECF3F",
+    "#4D4D4D",
     "#F15854"]
 
 createContributionChart :: TimeZone -> Text -> [(Text,[Maybe (LocalTime,Double)])] -> Renderable ()
@@ -136,6 +136,12 @@ createContributionChart tz title vss =
       layout_background .= solidFillStyle (opaque white)
       layout_foreground .= (opaque black)
       layout_left_axis_visibility . axis_show_ticks .= False
+      layout_legend . _Just . legend_orientation .= LOCols 1
+      layout_legend . _Just . legend_margin .= 10
+      layout_y_axis . laxis_title .= "(%)"
+      layout_x_axis . laxis_title .= timeZoneName tz
+      -- layout_x_axis . laxis_style . axis_label_gap .= 10
+      -- layout_margin .= 100
       setColors colours
 
 
