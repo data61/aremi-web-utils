@@ -11,12 +11,17 @@ import           Data.Ord                                  (comparing)
 
 import           Control.Applicative
 import           Control.Monad                             (forM, forM_)
-import           Data.Monoid                               ()
+import           Data.Monoid                               ((<>))
 
 import           Data.Time.Calendar                        (Day, fromGregorian)
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
-import           Data.Time.LocalTime                       (LocalTime)
+import           Data.Time.LocalTime                       (LocalTime, TimeZone,
+                                                            timeZoneName,
+                                                            getCurrentTimeZone,
+                                                            utcToLocalTime,
+                                                            localTimeToUTC,
+                                                            utc)
 import           System.Locale                             (defaultTimeLocale)
 
 import           Control.Lens                              as L
@@ -28,7 +33,7 @@ import           Data.Text.Lens
 -- import           Data.ByteString.Lazy                      (ByteString)
 import qualified Data.ByteString.Lazy                      as BSL
 import           Data.Text                                 (Text, unpack)
--- import qualified Data.Text                                 as T
+import qualified Data.Text                                 as T
 
 -- import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
@@ -50,6 +55,7 @@ states = ["nsw", "vic", "qld", "sa", "tas"]
 
 main :: IO ()
 main = do
+    tz <- getCurrentTimeZone
 
 
     js <- runEitherT . fetchDate $ fromGregorian 2015 3 17
@@ -59,9 +65,10 @@ main = do
             let vs = v ^.. key "contribution" . values
                 allStates :: [(Text,[Maybe (LocalTime,Double)])]
                 allStates = map (\name -> (name, getTS _Show name vs)) states
-            (allsvg,_) <- renderableToSVGString (createContributionChart allStates) 800 600
+            (allsvg,_) <- renderableToSVGString (createContributionChart tz "All states contribution" allStates) 800 400
             ssvgs <- forM states $ \sname -> do
-                    (ssvg,_) <- renderableToSVGString (createContributionChart [(sname,getTS _Show sname vs)]) 800 600
+                    let title = T.toUpper sname <> " contribution (%)"
+                    (ssvg,_) <- renderableToSVGString (createContributionChart tz title [(sname,getTS _Show sname vs)]) 800 400
                     return (sname,ssvg)
 
             return . Just . H.fromList $ ("all",allsvg):ssvgs
@@ -120,8 +127,8 @@ colours = map (opaque . sRGB24read) [
     "#DECF3F",
     "#F15854"]
 
-createContributionChart :: Text -> [(Text,[Maybe (LocalTime,Double)])] -> Renderable ()
-createContributionChart title vss =
+createContributionChart :: TimeZone -> Text -> [(Text,[Maybe (LocalTime,Double)])] -> Renderable ()
+createContributionChart tz title vss =
  -- toFile def file $
  toRenderable $
     do
@@ -136,6 +143,10 @@ createContributionChart title vss =
           plot . liftEC $ do
                 colour <- takeColor
                 plot_lines_title .= (unpack name)
-                plot_lines_values .= [ [ (d,v) | Just (d,v) <- vs] ]
+                plot_lines_values .= [ [ (utcToLocal d,v) | Just (d,v) <- vs] ]
                 plot_lines_style . line_color .= colour
                 plot_lines_style . line_width .= 3
+    where
+        utcToLocal :: LocalTime -> LocalTime
+        utcToLocal lt = utcToLocalTime tz (localTimeToUTC utc lt)
+
