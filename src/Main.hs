@@ -14,12 +14,14 @@ import           Control.Applicative
 import           Control.Monad                             (forM, forM_)
 import           Data.Monoid                               ((<>))
 
-import           Data.Time.Calendar                        (Day, fromGregorian)
+import           Data.Time.Calendar                        (Day)
 import           Data.Time.Clock                           (UTCTime)
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
-import           Data.Time.LocalTime                       (LocalTime, TimeZone,
-                                                            getCurrentTimeZone,
+import           Data.Time.LocalTime                       (LocalTime (..),
+                                                            TimeZone,
+                                                            ZonedTime (..),
+                                                            getZonedTime,
                                                             timeZoneName,
                                                             utcToLocalTime)
 import           System.Locale                             (defaultTimeLocale)
@@ -30,18 +32,19 @@ import qualified Data.Aeson                                as A
 import           Data.Aeson.Lens                           as AL
 import           Data.Text.Lens
 
--- import           Data.ByteString.Lazy                      (ByteString)
+import           Data.ByteString.Lazy                      (ByteString)
 -- import qualified Data.ByteString.Lazy                      as BSL
 import           Data.Text                                 (Text, unpack)
 import qualified Data.Text                                 as T
 
--- import           Data.HashMap.Strict                       (HashMap)
+import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
 
 import           Network.HTTP.Conduit                      (simpleHttp)
 
-import           Control.Monad.Catch                       (catch)
+import           Control.Monad.Catch                       (SomeException,
+                                                            catch)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Either
 
@@ -55,37 +58,38 @@ states = ["nsw", "vic", "qld", "sa", "tas","wa"]
 
 main :: IO ()
 main = do
-    tz <- getCurrentTimeZone
+    now <- getZonedTime
 
+    ref <- newIORef (now, CsvBS "", H.empty)
 
-    js <- runEitherT . fetchDate $ fromGregorian 2015 3 17
-    msvgs <- case js of
-        Left str -> putStrLn str >> return Nothing
-        Right v -> do
-            let vs = v ^.. key "contribution" . values
-                allStates :: [(Text,[Maybe (UTCTime,Double)])]
-                allStates = map (\name -> (name, getTS _Show name vs)) states
-                allChart = createContributionChart tz "All states contribution" allStates
+    success <- runEitherT $ updateRef ref
 
-            (!allsvg,_) <- renderableToSVGString allChart 800 400
+newtype SvgBS = SvgBS ByteString
+newtype CsvBS = CsvBS ByteString
 
-            ssvgs <- forM states $ \sname -> do
-                    let title = T.toUpper sname <> " contribution (%)"
-                        chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
-                    (!ssvg,_) <- renderableToSVGString chart 800 400
-                    return (sname,ssvg)
+updateRef :: IORef (ZonedTime, CsvBS, HashMap Text SvgBS) -> EitherT String IO Bool
+updateRef ref = flip catch (\e -> (left . show $ (e :: SomeException)) >> return False) $ do
+    now <- liftIO $ getZonedTime
+    let day = localDay . zonedTimeToLocalTime $ now
+        tz = zonedTimeZone now
 
-            return . Just $! H.fromList $ ("all",allsvg):ssvgs
+    jsn <- fetchDate day
+    let vs = jsn ^.. key "contribution" . values
 
-    scottyOpts def $ do
-        get ( "/contribution/:state/svg") $ do
-            stat <- param "state" :: ActionM Text
-            case msvgs >>= H.lookup stat of
-                  Nothing -> next
-                  Just bs -> do
-                      setHeader "Content-Type" "image/svg+xml"
-                      raw bs
+        allStates :: [(Text,[Maybe (UTCTime,Double)])]
+        allStates = map (\name -> (name, getTS _Show name vs)) states
+        allChart = createContributionChart tz "All states contribution" allStates
 
+    (!allsvg,_) <- liftIO $ renderableToSVGString allChart 800 400
+
+    ssvgs <- liftIO $ forM states $ \sname -> do
+            let title = T.toUpper sname <> " contribution (%)"
+                chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
+            (!ssvg,_) <- renderableToSVGString chart 800 400
+            return (sname,(SvgBS ssvg))
+
+    liftIO . writeIORef ref  . (,,) now (CsvBS "") $! H.fromList $ ("all",(SvgBS allsvg)):ssvgs
+    return True
 
 
 
