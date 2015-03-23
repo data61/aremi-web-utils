@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Rank2Types        #-}
+{-# LANGUAGE TemplateHaskell   #-}
 
 module Main where
 
@@ -53,6 +54,14 @@ import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Backend.Diagrams
 import           Graphics.Rendering.Chart.Easy
 
+import           Data.IORef
+
+import qualified System.Log.Logger                         as HSL
+import           System.Log.Logger.TH                      (deriveLoggers)
+
+
+$(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
+
 states :: [Text]
 states = ["nsw", "vic", "qld", "sa", "tas","wa"]
 
@@ -63,6 +72,26 @@ main = do
     ref <- newIORef (now, CsvBS "", H.empty)
 
     success <- runEitherT $ updateRef ref
+
+    case success of
+        Left str -> errorM str
+        Right False -> errorM "Something went wrong?"
+        Right True ->  do
+            debugM "Successfully fetched"
+
+
+            scottyOpts def $ do
+                get ( "/contribution/:state/svg") $ do
+                    (_, _, hm) <- liftIO $ readIORef ref
+                    stat <- param "state" :: ActionM Text
+                    case H.lookup stat hm of
+                          Nothing -> next
+                          Just (SvgBS bs) -> do
+                              setHeader "Content-Type" "image/svg+xml"
+                              raw bs
+                get ("contribution/:state/csv") $ do
+                    next
+
 
 newtype SvgBS = SvgBS ByteString
 newtype CsvBS = CsvBS ByteString
@@ -97,11 +126,11 @@ updateRef ref = flip catch (\e -> (left . show $ (e :: SomeException)) >> return
 fetchDate :: Day -> EitherT String IO Value
 fetchDate day = do
     let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
-    liftIO $ print url
+    debugM $ "Fetching " ++  url
 
-    -- bs <- liftIO (simpleHttp url)
-        -- `catch` (\e -> left . show $ (e :: SomeException))
-    bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
+    bs <- liftIO (simpleHttp url)
+        `catch` (\e -> left . show $ (e :: SomeException))
+    -- bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
 
     hoistEither $ A.eitherDecode' bs
 
