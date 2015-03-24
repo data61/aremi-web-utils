@@ -8,6 +8,7 @@ module Main where
 
 import           Web.Scotty                                as S
 
+import           Data.Either                               (isLeft)
 import           Data.List                                 (sortBy)
 import           Data.Ord                                  (comparing)
 
@@ -45,7 +46,7 @@ import qualified Data.HashMap.Strict                       as H
 import           Network.HTTP.Conduit                      (simpleHttp)
 
 import           Control.Monad.Catch                       (SomeException,
-                                                            catch)
+                                                            catch, tryJust)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Either
 
@@ -59,6 +60,8 @@ import           Data.IORef
 import qualified System.Log.Logger                         as HSL
 import           System.Log.Logger.TH                      (deriveLoggers)
 
+import           Control.Retry
+
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
@@ -69,14 +72,13 @@ main :: IO ()
 main = do
     now <- getZonedTime
 
-    ref <- newIORef (now, CsvBS "", H.empty)
+    ref <- newIORef (now, Nothing, H.empty)
 
-    success <- runEitherT $ updateRef ref
+    success <- updateRef ref
 
     case success of
-        Left str -> errorM str
-        Right False -> errorM "Something went wrong?"
-        Right True ->  do
+        False -> errorM "Something went wrong?"
+        True ->  do
             debugM "Successfully fetched"
 
 
@@ -96,17 +98,23 @@ main = do
 newtype SvgBS = SvgBS ByteString
 newtype CsvBS = CsvBS ByteString
 
-updateRef :: IORef (ZonedTime, CsvBS, HashMap Text SvgBS) -> EitherT String IO Bool
-updateRef ref = flip catch (\e -> (left . show $ (e :: SomeException)) >> return False) $ do
-    now <- liftIO $ getZonedTime
+updateRef :: IORef (ZonedTime, Maybe CsvBS, HashMap Text SvgBS) -> IO Bool
+updateRef ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> return False) $ do
+    now <- getZonedTime
     let day = localDay . zonedTimeToLocalTime $ now
         tz = zonedTimeZone now
 
-    jsn <- fetchDate day
-    let vs = jsn ^.. key "contribution" . values
+    jsn <- retrying (fibonacciBackoff 100 <> limitRetries 10)
+                             (\_ e -> return (isLeft e))
+                             $ fetchDate day
+    let
+        vs :: [Value]
+        vs = jsn ^.. _Right . key "contribution" . values
 
         allStates :: [(Text,[Maybe (UTCTime,Double)])]
         allStates = map (\name -> (name, getTS _Show name vs)) states
+
+        allChart :: Renderable ()
         allChart = createContributionChart tz "All states contribution" allStates
 
     (!allsvg,_) <- liftIO $ renderableToSVGString allChart 800 400
@@ -117,22 +125,24 @@ updateRef ref = flip catch (\e -> (left . show $ (e :: SomeException)) >> return
             (!ssvg,_) <- renderableToSVGString chart 800 400
             return (sname,(SvgBS ssvg))
 
-    liftIO . writeIORef ref  . (,,) now (CsvBS "") $! H.fromList $ ("all",(SvgBS allsvg)):ssvgs
+    liftIO . writeIORef ref  . (,,) now Nothing $! H.fromList $ ("all",(SvgBS allsvg)):ssvgs
     return True
 
 
 
 
-fetchDate :: Day -> EitherT String IO Value
+-- fetchDate :: Day -> EitherT String IO Value
+fetchDate :: Day -> IO (Either String Value)
 fetchDate day = do
     let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
     debugM $ "Fetching " ++  url
 
-    bs <- liftIO (simpleHttp url)
-        `catch` (\e -> left . show $ (e :: SomeException))
+    ebs <- tryJust (\e -> Just . show $ (e::SomeException)) $ simpleHttp url
+          -- `catch`
+          -- (\e -> return . Left . show $ (e :: SomeException))
     -- bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
 
-    hoistEither $ A.eitherDecode' bs
+    return $ ebs >>= A.eitherDecode'
 
 
 
