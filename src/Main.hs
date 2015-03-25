@@ -9,6 +9,7 @@ module Main where
 
 import           Web.Scotty                                as S
 
+import           Data.Maybe                               (maybeToList)
 import           Data.Either                               (isLeft)
 import           Data.List                                 (sortBy)
 import           Data.Ord                                  (comparing)
@@ -39,7 +40,10 @@ import           Data.Aeson.Lens                           as AL
 import           Data.Text.Lens
 
 import           Data.ByteString.Lazy                      (ByteString)
--- import qualified Data.ByteString.Lazy                      as BSL
+import qualified Data.ByteString.Lazy                      as BSL
+import           Data.ByteString ()
+import qualified Data.ByteString as S
+
 import           Data.Text                                 (Text, unpack)
 import qualified Data.Text                                 as T
 
@@ -47,7 +51,13 @@ import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
 
-import           Network.HTTP.Conduit                      (simpleHttp)
+import           Network.HTTP.Conduit                      (Manager,
+                                                            Request (..),
+                                                            httpLbs, parseUrl,
+                                                            responseBody,
+                                                            responseHeaders,
+                                                            simpleHttp,
+                                                            withManager)
 
 import           Control.Monad.Catch                       (SomeException,
                                                             catch, tryJust)
@@ -59,7 +69,6 @@ import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Backend.Diagrams
 import           Graphics.Rendering.Chart.Easy
 
-import           Data.IORef
 
 import           System.Log.Formatter                      (simpleLogFormatter)
 import           System.Log.Handler                        (setFormatter)
@@ -76,7 +85,28 @@ import           Data.Time.Units                           hiding (Day)
 
 import           System.Remote.Monitoring
 
+
+newtype SvgBS = SvgBS {unSvg :: ByteString}
+newtype CsvBS = CsvBS {unCsv :: ByteString}
+
+type ETag = S.ByteString
+
+
+data AppState = AppState {
+      _timeFetched        :: Maybe ZonedTime
+    , _latestETag         :: Maybe ETag
+    , _contributionCSV    :: Maybe CsvBS
+    , _contributionGraphs :: HashMap Text SvgBS
+    , _performanceCSV     :: Maybe CsvBS
+    , _performanceGraphs  :: HashMap Text SvgBS
+}
+
+$(makeLenses ''AppState)
+
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
+
+instance Default AppState where
+    def = AppState Nothing Nothing Nothing H.empty Nothing H.empty
 
 states :: [Text]
 states = ["nsw", "vic", "qld", "sa", "tas","wa"]
@@ -91,7 +121,7 @@ main = do
 
     now <- getZonedTime
 
-    ref <- newIORef (now, Nothing, H.empty)
+    ref <- newIORef def
 
     success <- updateRef 20 ref
 
@@ -103,9 +133,9 @@ main = do
 
             scottyOpts def $ do
                 get ( "/contribution/:state/svg") $ do
-                    (_, _, hm) <- liftIO $ readIORef ref
+                    current <- liftIO $ readIORef ref
                     stat <- param "state" :: ActionM Text
-                    case H.lookup stat hm of
+                    case H.lookup stat (_contributionGraphs current) of
                           Nothing -> next
                           Just (SvgBS bs) -> do
                               setHeader "Content-Type" "image/svg+xml"
@@ -113,31 +143,60 @@ main = do
                 get ("contribution/:state/csv") $ do
                     next
 
-
-newtype SvgBS = SvgBS ByteString
-newtype CsvBS = CsvBS ByteString
-
-updateRef :: IORef (ZonedTime, Maybe CsvBS, HashMap Text SvgBS) -> IO Bool
-updateRef ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> return False) $ do
+-- (ZonedTime, Maybe CsvBS, HashMap Text SvgBS)
+updateRef :: Int -> IORef AppState -> IO Bool
+updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> return False) $ do
     now <- getZonedTime
     let day = localDay . zonedTimeToLocalTime $ now
         tz = zonedTimeZone now
 
-    jsn <- retrying (fibonacciBackoff 100 <> limitRetries 10)
---- | Run an event every n time units. Does not guarantee that it will be run
-                             (\_ e -> return (isLeft e))
-                             $ fetchDate day
-    let
-        vs :: [Value]
-        vs = jsn ^.. _Right . key "contribution" . values
+    current <- readIORef ref
+    ejsn <- withManager $ \m ->
+            liftIO $ retrying (fibonacciBackoff 1000 <> limitRetries retries)
+                     (\_ e -> return (isLeft e))
+                     $ fetchDate m day (_latestETag current)
+    case ejsn of
+        Left err -> errorM err >> return False
+        Right (fetched, jsn, metag) -> do
+            let
+                vs :: [Value]
+                vs = jsn ^.. key "contribution" . values
 
-        allStates :: [(Text,[Maybe (UTCTime,Double)])]
-        allStates = map (\name -> (name, getTS _Show name vs)) states
+                allStates :: [(Text,[Maybe (UTCTime,Double)])]
+                allStates = map (\name -> (name, getTS _Show name vs)) states
 
-        allChart :: Renderable ()
-        allChart = createContributionChart tz "All states contribution" allStates
+                allTitle :: Text
+                allTitle = T.pack $ formatTime defaultTimeLocale "All states contribution (%%) %F %X %Z" fetched
 
-    (!allsvg,_) <- liftIO $ renderableToSVGString allChart 800 400
+                allChart :: Renderable ()
+                allChart = createContributionChart tz allTitle allStates
+
+            debugM "Rendering SVGs"
+            (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
+            let !allsvg = BSL.fromStrict . BSL.toStrict $ allsvg'
+
+            ssvgs <- liftIO $ forM states $ \sname -> do
+                    let title = T.toUpper sname <> " contribution (%)"
+                        chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
+                    (ssvg,_) <- renderableToSVGString chart 800 400
+                    let !strict = BSL.fromStrict . BSL.toStrict $ ssvg
+                    return (sname,(SvgBS ssvg))
+            debugM "Done rengering SVGs"
+
+            let allPairs = ("all",(SvgBS allsvg)):ssvgs
+                svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 allPairs
+            debugM $ "Total SVG size: " ++ show svgSize
+            let newState = current {
+                    _contributionGraphs = H.fromList allPairs,
+                    _timeFetched = Just now,
+                    _latestETag = metag <|> _latestETag current
+                }
+
+            liftIO . writeIORef ref $! newState
+            return True
+
+
+
 --- | Run an event every n time units. Does not guarantee that it will be run
 --- each occurance of n time units if the action takes longer than n time to run.
 --- It will run each action at the next block of n time (it can miss deadlines).
@@ -145,21 +204,12 @@ every :: TimeUnit a => IO b -> a -> IO (ThreadId,MVar ())
 every act t = do
     mv <- newEmptyMVar
 
-    ssvgs <- liftIO $ forM states $ \sname -> do
     now <- getCurrentTime
-            let title = T.toUpper sname <> " contribution (%)"
     let ms = toMicroseconds t
-                chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
         ps = ms * 1000000
-            (!ssvg,_) <- renderableToSVGString chart 800 400
         d = toEnum . fromIntegral $ ps :: NominalDiffTime
-            return (sname,(SvgBS ssvg))
-
-    liftIO . writeIORef ref  . (,,) now Nothing $! H.fromList $ ("all",(SvgBS allsvg)):ssvgs
         activations = iterate (addUTCTime d) now
-    return True
 
---- It will run each action at the next block of n time (it can miss deadlines).
     tid <- forkIO (run activations >> putMVar mv ())
     return (tid, mv)
     where
@@ -175,17 +225,31 @@ every act t = do
 
 
 -- fetchDate :: Day -> EitherT String IO Value
-fetchDate :: Day -> IO (Either String Value)
-fetchDate day = do
+fetchDate :: Manager -> Day -> Maybe ETag -> IO (Either String (UTCTime,Value,Maybe ETag))
+fetchDate manager day metag = do
     let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
+    initReq <- parseUrl url
+    let req = initReq {
+            requestHeaders = [
+                (  "Accept"         ,"application/json, text/javascript, */*")
+                , ("X-Requested-With", "XMLHttpRequest") -- lol
+            ]
+            ++ maybeToList ((,) "If-None-Match" <$> metag)
+        }
     debugM $ "Fetching " ++  url
 
-    ebs <- tryJust (\e -> Just . show $ (e::SomeException)) $ simpleHttp url
+    ersp <- tryJust (\e -> Just . show $ (e::SomeException)) $ do
+                    now <- getCurrentTime
+                    req <- httpLbs req manager
+                    return (req, now)
           -- `catch`
           -- (\e -> return . Left . show $ (e :: SomeException))
     -- bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
 
-    return $ ebs >>= A.eitherDecode'
+    return $ do
+        (rsp,now) <- ersp
+        val <- A.eitherDecode' (responseBody rsp)
+        return (now, val, lookup "ETag" (responseHeaders rsp))
 
 
 
