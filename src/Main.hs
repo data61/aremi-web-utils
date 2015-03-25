@@ -9,9 +9,9 @@ module Main where
 
 import           Web.Scotty                                as S
 
-import           Data.Maybe                               (maybeToList)
 import           Data.Either                               (isLeft)
 import           Data.List                                 (sortBy)
+import           Data.Maybe                                (maybeToList)
 import           Data.Ord                                  (comparing)
 
 import           Control.Applicative
@@ -39,10 +39,10 @@ import qualified Data.Aeson                                as A
 import           Data.Aeson.Lens                           as AL
 import           Data.Text.Lens
 
+import           Data.ByteString                           ()
+import qualified Data.ByteString                           as S
 import           Data.ByteString.Lazy                      (ByteString)
 import qualified Data.ByteString.Lazy                      as BSL
-import           Data.ByteString ()
-import qualified Data.ByteString as S
 
 import           Data.Text                                 (Text, unpack)
 import qualified Data.Text                                 as T
@@ -51,16 +51,20 @@ import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
 
-import           Network.HTTP.Conduit                      (Manager,
+import           Network.HTTP.Conduit                      (HttpException (StatusCodeException),
+                                                            Manager,
                                                             Request (..),
                                                             httpLbs, parseUrl,
                                                             responseBody,
                                                             responseHeaders,
                                                             simpleHttp,
                                                             withManager)
+import           Network.HTTP.Types.Status                 (Status (..))
 
-import           Control.Monad.Catch                       (SomeException,
-                                                            catch, tryJust)
+import           Control.Monad.Catch                       (Handler (..),
+                                                            SomeException,
+                                                            catch, catches,
+                                                            tryJust)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Either
 
@@ -85,6 +89,7 @@ import           Data.Time.Units                           hiding (Day)
 
 import           System.Remote.Monitoring
 
+import           System.Mem                                (performMajorGC)
 
 newtype SvgBS = SvgBS {unSvg :: ByteString}
 newtype CsvBS = CsvBS {unCsv :: ByteString}
@@ -157,7 +162,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                      $ fetchDate m day (_latestETag current)
     case ejsn of
         Left err -> errorM err >> return False
-        Right (fetched, jsn, metag) -> do
+        Right Nothing -> debugM "update not necessary" >> return True
+        Right (Just (fetched, jsn, metag)) -> do
             let
                 vs :: [Value]
                 vs = jsn ^.. key "contribution" . values
@@ -181,7 +187,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     (ssvg,_) <- renderableToSVGString chart 800 400
                     let !strict = BSL.fromStrict . BSL.toStrict $ ssvg
                     return (sname,(SvgBS ssvg))
-            debugM "Done rengering SVGs"
+            debugM "Done rendering SVGs"
 
             let allPairs = ("all",(SvgBS allsvg)):ssvgs
                 svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 allPairs
@@ -193,6 +199,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 }
 
             liftIO . writeIORef ref $! newState
+            performMajorGC
             return True
 
 
@@ -225,7 +232,7 @@ every act t = do
 
 
 -- fetchDate :: Day -> EitherT String IO Value
-fetchDate :: Manager -> Day -> Maybe ETag -> IO (Either String (UTCTime,Value,Maybe ETag))
+fetchDate :: Manager -> Day -> Maybe ETag -> IO (Either String (Maybe (UTCTime,Value,Maybe ETag)))
 fetchDate manager day metag = do
     let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
     initReq <- parseUrl url
@@ -238,18 +245,42 @@ fetchDate manager day metag = do
         }
     debugM $ "Fetching " ++  url
 
-    ersp <- tryJust (\e -> Just . show $ (e::SomeException)) $ do
-                    now <- getCurrentTime
-                    req <- httpLbs req manager
-                    return (req, now)
+    print req
+
+    ersp <- (do
+        now <- getCurrentTime
+        rsp <- httpLbs req manager
+        return $ Right (Just (rsp, now))
+        ) `catches` [
+            Handler $ \e ->
+                case e of
+                    StatusCodeException (Status {statusCode = 304}) _ _ ->
+                        return $ Right Nothing
+                    _ ->
+                        return $ Left (show e)
+            , Handler $ \e -> return $ Left (show (e :: SomeException))
+        ]
+
+    -- ersp <- tryJust (\e -> Just . show $ (e::SomeException)) $ do
+
+    case ersp of
+        Right (Just (rsp,_)) -> print (rsp {responseBody = ""})
+        _ -> return ()
           -- `catch`
           -- (\e -> return . Left . show $ (e :: SomeException))
     -- bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
 
     return $ do
-        (rsp,now) <- ersp
-        val <- A.eitherDecode' (responseBody rsp)
-        return (now, val, lookup "ETag" (responseHeaders rsp))
+        mpair <- ersp
+        case mpair of
+            Just (rsp,now) -> do
+                val <- A.eitherDecode' (responseBody rsp)
+                return $ Just (now, val, lookup "ETag" (responseHeaders rsp))
+            Nothing -> return Nothing
+
+
+
+
 
 
 
