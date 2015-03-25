@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Rank2Types        #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# OPTIONS_GHC -with-rtsopts=-T #-}
 
 module Main where
 
@@ -17,7 +18,10 @@ import           Control.Monad                             (forM, forM_)
 import           Data.Monoid                               ((<>))
 
 import           Data.Time.Calendar                        (Day)
-import           Data.Time.Clock                           (UTCTime)
+import           Data.Time.Clock                           (NominalDiffTime,
+                                                            UTCTime, addUTCTime,
+                                                            diffUTCTime,
+                                                            getCurrentTime)
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
 import           Data.Time.LocalTime                       (LocalTime (..),
@@ -57,11 +61,20 @@ import           Graphics.Rendering.Chart.Easy
 
 import           Data.IORef
 
+import           System.Log.Formatter                      (simpleLogFormatter)
+import           System.Log.Handler                        (setFormatter)
+import qualified System.Log.Handler
+import           System.Log.Handler.Simple
 import qualified System.Log.Logger                         as HSL
 import           System.Log.Logger.TH                      (deriveLoggers)
 
-import           Control.Retry
 
+import           Control.Concurrent
+import           Control.Retry
+import           Data.IORef
+import           Data.Time.Units                           hiding (Day)
+
+import           System.Remote.Monitoring
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
@@ -70,17 +83,23 @@ states = ["nsw", "vic", "qld", "sa", "tas","wa"]
 
 main :: IO ()
 main = do
+    forkServer "localhost" 8000
+
+    h' <- fileHandler "all.log" HSL.DEBUG
+    h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
+    HSL.updateGlobalLogger "Main" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
+
     now <- getZonedTime
 
     ref <- newIORef (now, Nothing, H.empty)
 
-    success <- updateRef ref
+    success <- updateRef 20 ref
 
     case success of
         False -> errorM "Something went wrong?"
         True ->  do
-            debugM "Successfully fetched"
-
+            infoM "Successfully fetched today's data"
+            _tid <- updateRef 10 ref `every` (5 :: Minute)
 
             scottyOpts def $ do
                 get ( "/contribution/:state/svg") $ do
@@ -105,6 +124,7 @@ updateRef ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> r
         tz = zonedTimeZone now
 
     jsn <- retrying (fibonacciBackoff 100 <> limitRetries 10)
+--- | Run an event every n time units. Does not guarantee that it will be run
                              (\_ e -> return (isLeft e))
                              $ fetchDate day
     let
@@ -118,16 +138,39 @@ updateRef ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> r
         allChart = createContributionChart tz "All states contribution" allStates
 
     (!allsvg,_) <- liftIO $ renderableToSVGString allChart 800 400
+--- | Run an event every n time units. Does not guarantee that it will be run
+--- each occurance of n time units if the action takes longer than n time to run.
+--- It will run each action at the next block of n time (it can miss deadlines).
+every :: TimeUnit a => IO b -> a -> IO (ThreadId,MVar ())
+every act t = do
+    mv <- newEmptyMVar
 
     ssvgs <- liftIO $ forM states $ \sname -> do
+    now <- getCurrentTime
             let title = T.toUpper sname <> " contribution (%)"
+    let ms = toMicroseconds t
                 chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
+        ps = ms * 1000000
             (!ssvg,_) <- renderableToSVGString chart 800 400
+        d = toEnum . fromIntegral $ ps :: NominalDiffTime
             return (sname,(SvgBS ssvg))
 
     liftIO . writeIORef ref  . (,,) now Nothing $! H.fromList $ ("all",(SvgBS allsvg)):ssvgs
+        activations = iterate (addUTCTime d) now
     return True
 
+--- It will run each action at the next block of n time (it can miss deadlines).
+    tid <- forkIO (run activations >> putMVar mv ())
+    return (tid, mv)
+    where
+        run :: [UTCTime] -> IO ()
+        run ts = do
+            _ <- act
+            now <- getCurrentTime
+            case dropWhile (<= now) ts of
+                (nxt:ts') ->
+                    let delay = fromEnum (diffUTCTime nxt now) `div` 1000000
+                    in threadDelay delay >> run ts'
 
 
 
