@@ -94,12 +94,12 @@ type ETag = S.ByteString
 
 
 data AppState = AppState {
-      _timeFetched        :: Maybe ZonedTime
-    , _latestETag         :: Maybe ETag
-    , _contributionCSV    :: Maybe CsvBS
-    , _contributionGraphs :: HashMap Text SvgBS
-    , _performanceCSV     :: Maybe CsvBS
-    , _performanceGraphs  :: HashMap Text SvgBS
+      _timeFetched        :: !(Maybe ZonedTime)
+    , _latestETag         :: !(Maybe ETag)
+    , _contributionCSV    :: !(Maybe CsvBS)
+    , _contributionGraphs :: !(HashMap Text SvgBS)
+    , _performanceCSV     :: !(Maybe CsvBS)
+    , _performanceGraphs  :: !(HashMap Text SvgBS)
 }
 
 $(makeLenses ''AppState)
@@ -163,51 +163,66 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
         Err err -> errorM err >> return False
         NoChange -> debugM "update not necessary" >> return True
         NewData metag (fetched, jsn) -> do
+            allContSvgs <- renderCharts (fetched, jsn) tz "performance"  _Show
+            allPerfSvgs <- renderCharts (fetched, jsn) tz "contribution" _Double
+
+            let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
+
+            debugM $ "Total SVG size: " ++ show svgSize
+
+            let !newState = current
+                    & contributionGraphs .~ H.fromList allContSvgs
+                    & performanceGraphs  .~ H.fromList allPerfSvgs
+                    & timeFetched        .~ Just now
+                    & latestETag         .~ (metag <|> current ^. latestETag)
+
+            liftIO . writeIORef ref $ newState
+            performMajorGC
+            return True
+    where
+        renderCharts :: (UTCTime,Value) -> TimeZone -> Text
+                     -> Prism' String Double
+                     -> IO [(Text,SvgBS)]
+        renderCharts (fetched,jsn) tz title lns = do
             let
-                conts :: [Value]
-                conts = jsn ^.. key "contribution" . values
+                vals :: [Value]
+                vals = jsn ^.. key "title" . values
 
                 allStates :: [(Text,[Maybe (UTCTime,Double)])]
-                allStates = map (\name -> (name, getTS _Show name conts)) states
+                allStates = map (\name -> (name, getTS lns name vals)) states
+
+                titleStr :: String
+                titleStr = "All states " ++ T.unpack title ++ " (%%) %F %X %Z"
 
                 allTitle :: Text
-                allTitle = T.pack $ formatTime defaultTimeLocale "All states contribution (%%) %F %X %Z" fetched
+                allTitle = T.pack $ formatTime defaultTimeLocale titleStr fetched
 
                 allChart :: Renderable ()
                 allChart = createContributionChart tz allTitle allStates
 
             debugM "Rendering SVGs"
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
-            let !allsvg = BSL.fromStrict . BSL.toStrict $ allsvg'
+            let !allsvg = SvgBS $ unchunkBS allsvg'
 
             ssvgs <- liftIO $ forM states $ \sname -> do
-                    let title = T.toUpper sname <> " contribution (%)"
-                        chart = createContributionChart tz title [(sname,getTS _Show sname conts)]
+                    let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
+                        chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
                     (ssvg',_) <- renderableToSVGString chart 800 400
-                    let !ssvg = BSL.fromStrict . BSL.toStrict $ ssvg'
-                    return (sname,(SvgBS ssvg))
+                    let !ssvg = SvgBS $ unchunkBS ssvg'
+                    return (sname, ssvg)
             debugM "Done rendering SVGs"
 
-            let allPairs = ("all",(SvgBS allsvg)):ssvgs
-                svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 allPairs
+            return $ ("all",allsvg):ssvgs
 
-            debugM $ "Total SVG size: " ++ show svgSize
 
-            let newState = current
-                    & contributionGraphs .~ H.fromList allPairs
-                    & timeFetched        .~ Just now
-                    & latestETag         .~ (metag <|> current ^. latestETag)
-
-            liftIO . writeIORef ref $! newState
-            performMajorGC
-            return True
-
+unchunkBS :: ByteString -> ByteString
+unchunkBS = BSL.fromStrict . BSL.toStrict
 
 
 --- | Run an event every n time units. Does not guarantee that it will be run
 --- each occurance of n time units if the action takes longer than n time to run.
 --- It will run each action at the next block of n time (it can miss deadlines).
-every :: TimeUnit a => IO b -> a -> IO (ThreadId,MVar ())
+every :: TimeUnit t => IO a -> t -> IO (ThreadId,MVar ())
 every act t = do
     mv <- newEmptyMVar
 
