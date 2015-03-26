@@ -9,14 +9,12 @@ module Main where
 
 import           Web.Scotty                                as S
 
-import           Data.Either                               (isLeft)
 import           Data.List                                 (sortBy)
 import           Data.Maybe                                (maybeToList)
 import           Data.Ord                                  (comparing)
 
 import           Control.Applicative
 import           Control.Monad                             (forM, forM_)
-import           Data.Monoid                               ((<>))
 
 import           Data.Time.Calendar                        (Day)
 import           Data.Time.Clock                           (NominalDiffTime,
@@ -57,16 +55,13 @@ import           Network.HTTP.Conduit                      (HttpException (Statu
                                                             httpLbs, parseUrl,
                                                             responseBody,
                                                             responseHeaders,
-                                                            simpleHttp,
                                                             withManager)
 import           Network.HTTP.Types.Status                 (Status (..))
 
 import           Control.Monad.Catch                       (Handler (..),
                                                             SomeException,
-                                                            catch, catches,
-                                                            tryJust)
+                                                            catch, catches)
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Either
 
 -- Chart stuff
 import           Data.Colour.SRGB                          (sRGB24read)
@@ -76,7 +71,6 @@ import           Graphics.Rendering.Chart.Easy
 
 import           System.Log.Formatter                      (simpleLogFormatter)
 import           System.Log.Handler                        (setFormatter)
-import qualified System.Log.Handler
 import           System.Log.Handler.Simple
 import qualified System.Log.Logger                         as HSL
 import           System.Log.Logger.TH                      (deriveLoggers)
@@ -90,6 +84,8 @@ import           Data.Time.Units                           hiding (Day)
 import           System.Remote.Monitoring
 
 import           System.Mem                                (performMajorGC)
+
+$(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
 newtype SvgBS = SvgBS {unSvg :: ByteString}
 newtype CsvBS = CsvBS {unCsv :: ByteString}
@@ -108,10 +104,16 @@ data AppState = AppState {
 
 $(makeLenses ''AppState)
 
-$(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
 instance Default AppState where
-    def = AppState Nothing Nothing Nothing H.empty Nothing H.empty
+    def = AppState {
+        _timeFetched        = Nothing,
+        _latestETag         = Nothing,
+        _contributionCSV    = Nothing,
+        _contributionGraphs = H.empty,
+        _performanceCSV     = Nothing,
+        _performanceGraphs  = H.empty
+    }
 
 states :: [Text]
 states = ["nsw", "vic", "qld", "sa", "tas","wa"]
@@ -124,29 +126,26 @@ main = do
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
     HSL.updateGlobalLogger "Main" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
 
-    now <- getZonedTime
-
     ref <- newIORef def
 
     success <- updateRef 20 ref
 
-    case success of
-        False -> errorM "Something went wrong?"
-        True ->  do
-            infoM "Successfully fetched today's data"
-            _tid <- updateRef 10 ref `every` (5 :: Minute)
+    if not success then errorM "Could not perform initial update"
+    else do
+        infoM "Successfully fetched today's data"
+        _tid <- updateRef 10 ref `every` (5 :: Minute)
 
-            scottyOpts def $ do
-                get ( "/contribution/:state/svg") $ do
-                    current <- liftIO $ readIORef ref
-                    stat <- param "state" :: ActionM Text
-                    case H.lookup stat (_contributionGraphs current) of
-                          Nothing -> next
-                          Just (SvgBS bs) -> do
-                              setHeader "Content-Type" "image/svg+xml"
-                              raw bs
-                get ("contribution/:state/csv") $ do
-                    next
+        scottyOpts def $ do
+            get ( "/contribution/:state/svg") $ do
+                current <- liftIO $ readIORef ref
+                stat <- param "state" :: ActionM Text
+                case H.lookup stat (current ^. contributionGraphs) of
+                      Nothing -> next
+                      Just (SvgBS bs) -> do
+                          setHeader "Content-Type" "image/svg+xml"
+                          raw bs
+            get ("contribution/:state/csv") $ do
+                next
 
 -- (ZonedTime, Maybe CsvBS, HashMap Text SvgBS)
 updateRef :: Int -> IORef AppState -> IO Bool
@@ -158,18 +157,18 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
     current <- readIORef ref
     ejsn <- withManager $ \m ->
             liftIO $ retrying (fibonacciBackoff 1000 <> limitRetries retries)
-                     (\_ e -> return (isLeft e))
+                     (\_ e -> return (isErr e))
                      $ fetchDate m day (_latestETag current)
     case ejsn of
-        Left err -> errorM err >> return False
-        Right Nothing -> debugM "update not necessary" >> return True
-        Right (Just (fetched, jsn, metag)) -> do
+        Err err -> errorM err >> return False
+        NoChange -> debugM "update not necessary" >> return True
+        NewData metag (fetched, jsn) -> do
             let
-                vs :: [Value]
-                vs = jsn ^.. key "contribution" . values
+                conts :: [Value]
+                conts = jsn ^.. key "contribution" . values
 
                 allStates :: [(Text,[Maybe (UTCTime,Double)])]
-                allStates = map (\name -> (name, getTS _Show name vs)) states
+                allStates = map (\name -> (name, getTS _Show name conts)) states
 
                 allTitle :: Text
                 allTitle = T.pack $ formatTime defaultTimeLocale "All states contribution (%%) %F %X %Z" fetched
@@ -183,20 +182,21 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
             ssvgs <- liftIO $ forM states $ \sname -> do
                     let title = T.toUpper sname <> " contribution (%)"
-                        chart = createContributionChart tz title [(sname,getTS _Show sname vs)]
-                    (ssvg,_) <- renderableToSVGString chart 800 400
-                    let !strict = BSL.fromStrict . BSL.toStrict $ ssvg
+                        chart = createContributionChart tz title [(sname,getTS _Show sname conts)]
+                    (ssvg',_) <- renderableToSVGString chart 800 400
+                    let !ssvg = BSL.fromStrict . BSL.toStrict $ ssvg'
                     return (sname,(SvgBS ssvg))
             debugM "Done rendering SVGs"
 
             let allPairs = ("all",(SvgBS allsvg)):ssvgs
                 svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 allPairs
+
             debugM $ "Total SVG size: " ++ show svgSize
-            let newState = current {
-                    _contributionGraphs = H.fromList allPairs,
-                    _timeFetched = Just now,
-                    _latestETag = metag <|> _latestETag current
-                }
+
+            let newState = current
+                    & contributionGraphs .~ H.fromList allPairs
+                    & timeFetched        .~ Just now
+                    & latestETag         .~ (metag <|> current ^. latestETag)
 
             liftIO . writeIORef ref $! newState
             performMajorGC
@@ -229,70 +229,54 @@ every act t = do
                     let delay = fromEnum (diffUTCTime nxt now) `div` 1000000
                     in threadDelay delay >> run ts'
 
+data FetchResponse a
+    = Err String
+    | NoChange
+    | NewData (Maybe ETag) a
 
+isErr :: FetchResponse a -> Bool
+isErr (Err _) = True
+isErr _       = False
 
--- fetchDate :: Day -> EitherT String IO Value
-fetchDate :: Manager -> Day -> Maybe ETag -> IO (Either String (Maybe (UTCTime,Value,Maybe ETag)))
+fetchDate :: Manager -> Day -> Maybe ETag -> IO (FetchResponse (UTCTime, Value))
 fetchDate manager day metag = do
     let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
     initReq <- parseUrl url
     let req = initReq {
             requestHeaders = [
-                (  "Accept"         ,"application/json, text/javascript, */*")
-                , ("X-Requested-With", "XMLHttpRequest") -- lol
+                ("Accept"          , "application/json, text/javascript, */*"),
+                ("X-Requested-With", "XMLHttpRequest")
             ]
             ++ maybeToList ((,) "If-None-Match" <$> metag)
         }
     debugM $ "Fetching " ++  url
 
-    print req
+    debugM $ show req
 
-    ersp <- (do
-        now <- getCurrentTime
+    catches (do
+        ts <- getCurrentTime
         rsp <- httpLbs req manager
-        return $ Right (Just (rsp, now))
-        ) `catches` [
-            Handler $ \e ->
-                case e of
-                    StatusCodeException (Status {statusCode = 304}) _ _ ->
-                        return $ Right Nothing
-                    _ ->
-                        return $ Left (show e)
-            , Handler $ \e -> return $ Left (show (e :: SomeException))
+        debugM $ show (rsp {responseBody = ()})
+        case A.eitherDecode' (responseBody rsp) of
+            Left str ->
+                return $ Err str
+            Right val ->
+                return $ NewData (lookup "ETag" (responseHeaders rsp)) (ts, val)
+
+        )
+        [
+            Handler $ \e -> case e of
+                -- If we get a 306 Not Modified there's nothing more to do
+                StatusCodeException (Status {statusCode = 304}) _ _ ->
+                    return $ NoChange
+                _ ->
+                    return $ Err (show e),
+            Handler $ \e -> return $ Err (show (e :: SomeException))
         ]
 
-    -- ersp <- tryJust (\e -> Just . show $ (e::SomeException)) $ do
-
-    case ersp of
-        Right (Just (rsp,_)) -> print (rsp {responseBody = ""})
-        _ -> return ()
-          -- `catch`
-          -- (\e -> return . Left . show $ (e :: SomeException))
-    -- bs <- liftIO $ BSL.readFile "snapshot-2015-03-13.json"
-
-    return $ do
-        mpair <- ersp
-        case mpair of
-            Just (rsp,now) -> do
-                val <- A.eitherDecode' (responseBody rsp)
-                return $ Just (now, val, lookup "ETag" (responseHeaders rsp))
-            Nothing -> return Nothing
 
 
-
-
-
-
-
--- getStateContributions :: Value -> Either String [(Text,[Double])]
-getKeyedSeries :: (AsValue t, Applicative f)
-                => Text -> Text
-                -> (Value -> f Value) -> t -> f t
-getKeyedSeries dataset ky = key dataset . values . key ky
-
-
-getTS :: (Read a, Show a)
-      => Prism' String a -> Text -> [Value] -> [Maybe (UTCTime, a)]
+getTS :: Prism' String a -> Text -> [Value] -> [Maybe (UTCTime, a)]
 getTS f state objs =
     let timeParser = parseTime defaultTimeLocale "%FT%H:%M:%SZ"
         timeLens   = key "ts" . _String . unpacked . to timeParser . _Just
@@ -319,18 +303,17 @@ createContributionChart tz title vss =
  -- toFile def file $
  toRenderable $
     do
-      layout_title .= (unpack title)
-      layout_background .= solidFillStyle (opaque white)
-      layout_foreground .= (opaque black)
-      layout_left_axis_visibility . axis_show_ticks .= False
-      layout_legend . _Just . legend_orientation .= LOCols 1
-      layout_legend . _Just . legend_margin .= 10
-      layout_y_axis . laxis_title .= "(%)"
-      layout_x_axis . laxis_title .= timeZoneName tz
+      layout_title                                  .= (unpack title)
+      layout_background                             .= solidFillStyle (opaque white)
+      layout_foreground                             .= (opaque black)
+      -- layout_left_axis_visibility . axis_show_ticks .= False
+      layout_legend . _Just . legend_orientation    .= LOCols 1
+      layout_legend . _Just . legend_margin         .= 10
+      layout_y_axis . laxis_title                   .= "(%)"
+      layout_x_axis . laxis_title                   .= timeZoneName tz
       -- layout_x_axis . laxis_style . axis_label_gap .= 10
       -- layout_margin .= 100
       setColors colours
-
 
       forM_ vss $ \(name,vs) ->
           plot . liftEC $ do
@@ -341,5 +324,5 @@ createContributionChart tz title vss =
                 plot_lines_style . line_width .= 3
     where
         utcToLocal :: UTCTime -> LocalTime
-        utcToLocal lt = utcToLocalTime tz lt -- (localTimeToUTC utc lt)
+        utcToLocal lt = utcToLocalTime tz lt
 
