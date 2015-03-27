@@ -77,6 +77,7 @@ import           System.Log.Logger.TH                      (deriveLoggers)
 
 
 import           Control.Concurrent
+import           Control.Concurrent.Async
 import           Control.Retry
 import           Data.IORef
 import           Data.Time.Units                           hiding (Day)
@@ -115,8 +116,15 @@ instance Default AppState where
         _performanceGraphs  = H.empty
     }
 
-states :: [Text]
-states = ["nsw", "vic", "qld", "sa", "tas","wa"]
+states :: [(Text, Int)]
+states = [
+    ("nsw",1),
+    ("vic",2),
+    ("qld",3),
+    ("sa",4),
+    ("tas",6),
+    ("wa",5)
+    ]
 
 main :: IO ()
 main = do
@@ -171,8 +179,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
         Err err -> errorM err >> return False
         NoChange -> debugM "update not necessary" >> return True
         NewData metag (fetched, jsn) -> do
-            allPerfSvgs <- renderCharts (fetched, jsn) tz "performance"  _Double
-            allContSvgs <- renderCharts (fetched, jsn) tz "contribution" (_String . unpacked . _Show)
+            allPerfSvgs' <- async $ renderCharts (fetched, jsn) tz "performance"  _Double
+            allContSvgs' <- async $ renderCharts (fetched, jsn) tz "contribution" (_String . unpacked . _Show)
+
+            allPerfSvgs <- wait allPerfSvgs'
+            allContSvgs <- wait allContSvgs'
 
             let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
 
@@ -197,7 +208,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 vals = jsn ^.. key title . values
 
                 allStates :: [(Text,[Maybe (UTCTime,Double)])]
-                allStates = map (\name -> (name, getTS lns name vals)) states
+                allStates = map (\(name,_) -> (name, getTS lns name vals)) states
 
                 titleStr :: String
                 titleStr = "All states " ++ T.unpack title
@@ -212,7 +223,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
             let !allsvg = SvgBS $ unchunkBS allsvg'
 
-            ssvgs <- liftIO $ forM states $ \sname -> do
+            ssvgs <- liftIO $ forM states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
                         chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
                     (ssvg',_) <- renderableToSVGString chart 800 400
