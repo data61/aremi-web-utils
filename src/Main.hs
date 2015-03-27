@@ -144,6 +144,14 @@ main = do
                       Just (SvgBS bs) -> do
                           setHeader "Content-Type" "image/svg+xml"
                           raw bs
+            get ( "/performance/:state/svg") $ do
+                current <- liftIO $ readIORef ref
+                stat <- param "state" :: ActionM Text
+                case H.lookup stat (current ^. performanceGraphs) of
+                      Nothing -> next
+                      Just (SvgBS bs) -> do
+                          setHeader "Content-Type" "image/svg+xml"
+                          raw bs
             get ("contribution/:state/csv") $ do
                 next
 
@@ -163,8 +171,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
         Err err -> errorM err >> return False
         NoChange -> debugM "update not necessary" >> return True
         NewData metag (fetched, jsn) -> do
-            allContSvgs <- renderCharts (fetched, jsn) tz "performance"  _Show
-            allPerfSvgs <- renderCharts (fetched, jsn) tz "contribution" _Double
+            allPerfSvgs <- renderCharts (fetched, jsn) tz "performance"  _Double
+            allContSvgs <- renderCharts (fetched, jsn) tz "contribution" (_String . unpacked . _Show)
 
             let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
 
@@ -177,30 +185,30 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     & latestETag         .~ (metag <|> current ^. latestETag)
 
             liftIO . writeIORef ref $ newState
-            performMajorGC
+            -- performMajorGC
             return True
     where
         renderCharts :: (UTCTime,Value) -> TimeZone -> Text
-                     -> Prism' String Double
+                     -> Prism' Value Double
                      -> IO [(Text,SvgBS)]
         renderCharts (fetched,jsn) tz title lns = do
             let
                 vals :: [Value]
-                vals = jsn ^.. key "title" . values
+                vals = jsn ^.. key title . values
 
                 allStates :: [(Text,[Maybe (UTCTime,Double)])]
                 allStates = map (\name -> (name, getTS lns name vals)) states
 
                 titleStr :: String
-                titleStr = "All states " ++ T.unpack title ++ " (%%) %F %X %Z"
+                titleStr = "All states " ++ T.unpack title
 
                 allTitle :: Text
-                allTitle = T.pack $ formatTime defaultTimeLocale titleStr fetched
+                allTitle = T.pack $ formatTime defaultTimeLocale (titleStr ++ " (%%) %F %X %Z") fetched
 
                 allChart :: Renderable ()
                 allChart = createContributionChart tz allTitle allStates
 
-            debugM "Rendering SVGs"
+            debugM $ "Rendering " ++ titleStr ++ " SVGs"
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
             let !allsvg = SvgBS $ unchunkBS allsvg'
 
@@ -210,7 +218,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     (ssvg',_) <- renderableToSVGString chart 800 400
                     let !ssvg = SvgBS $ unchunkBS ssvg'
                     return (sname, ssvg)
-            debugM "Done rendering SVGs"
+            debugM $ "Done rendering " ++ titleStr ++ " SVGs"
 
             return $ ("all",allsvg):ssvgs
 
@@ -291,11 +299,11 @@ fetchDate manager day metag = do
 
 
 
-getTS :: Prism' String a -> Text -> [Value] -> [Maybe (UTCTime, a)]
+getTS :: Prism' Value a -> Text -> [Value] -> [Maybe (UTCTime, a)]
 getTS f state objs =
     let timeParser = parseTime defaultTimeLocale "%FT%H:%M:%SZ"
         timeLens   = key "ts" . _String . unpacked . to timeParser . _Just
-        stateLens  = key state . _String . unpacked . f
+        stateLens  = key state . f
     in sortBy (comparing (fmap fst))
        . Prelude.map (\v -> (,) <$> v ^? timeLens <*> v ^? stateLens)
        $ objs
