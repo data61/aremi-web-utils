@@ -81,6 +81,8 @@ import           Control.Concurrent.Async
 import           Control.Retry
 import           Data.IORef
 import           Data.Time.Units                           hiding (Day)
+import           GHC.Conc.Sync                             (getNumProcessors,
+                                                            setNumCapabilities)
 
 import           System.Remote.Monitoring
 
@@ -128,6 +130,11 @@ states = [
 
 main :: IO ()
 main = do
+    -- This is the most reliable way of ensuring that the program runs using multiple threads.
+    -- Since we have some background processing happening, we need this to ensure the web server
+    -- remains responsive while producing new graphs.
+    getNumProcessors >>= setNumCapabilities
+
     forkServer "localhost" 8000
 
     h' <- fileHandler "all.log" HSL.DEBUG
