@@ -7,6 +7,7 @@
 module Main where
 
 
+import           Network.Wai.Middleware.Cors               (simpleCors)
 import           Web.Scotty                                as S
 
 import           Data.List                                 (sortBy)
@@ -150,6 +151,7 @@ main = do
     h' <- fileHandler "all.log" HSL.DEBUG
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
     HSL.updateGlobalLogger "Main" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
+    infoM "apvi-webservice launch"
 
     ref <- newIORef def
 
@@ -161,6 +163,7 @@ main = do
         _tid <- updateRef 10 ref `every` (5 :: Minute)
 
         scottyOpts def $ do
+            middleware simpleCors
             get ( "/contribution/:state/svg") $ do
                 current <- liftIO $ readIORef ref
                 stat <- param "state" :: ActionM Text
@@ -178,7 +181,6 @@ main = do
                           setHeader "Content-Type" "image/svg+xml"
                           raw bs
             get ("/contribution/csv") $ do
-                debugM "Contribution hit"
                 current <- liftIO $ readIORef ref
                 case _contributionCSV current of
                     Nothing -> next
@@ -193,6 +195,8 @@ main = do
                         setHeader "Content-Type" "text/csv"
                         raw bs
 
+-- Takes a number of retries and the current app state ref and attempts to contact APVI for the latest
+-- data for today.
 updateRef :: Int -> IORef AppState -> IO Bool
 updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> return False) $ do
     now <- getZonedTime
