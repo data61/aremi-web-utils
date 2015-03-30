@@ -260,7 +260,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 allChart = createContributionChart tz allTitle allStates
 
                 csvHeader :: Csv.Header
-                csvHeader = V.fromList [encodeUtf8 title,"State","Time"] :: V.Vector S.ByteString
+                csvHeader = V.fromList [encodeUtf8 title,"State","Time","Image"] :: V.Vector S.ByteString
 
                 currentValues :: [(Text,Maybe (UTCTime, Double))]
                 currentValues = map (second maximum) allStates
@@ -268,7 +268,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 namedRecords = map (\(state, Just (time, val))
                                     -> H.fromList [("State", toField $ lookup state states)
                                                   ,("Time", toField $ formatTime defaultTimeLocale "%FT%X" time)
-                                                  ,(encodeUtf8 title, toField val)]
+                                                  ,(encodeUtf8 title, toField val)
+                                                  ,("Image", toField $ T.concat ["<img src='http://localhost:3000/"
+                                                                                ,title,"/",state,"/svg'/>"])
+                                                  ]
+
                                     )
                                     currentValues
                 csv = encodeByNameWith defaultEncodeOptions csvHeader namedRecords
