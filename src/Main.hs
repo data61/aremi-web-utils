@@ -12,11 +12,12 @@ import           Web.Scotty                                as S
 
 import           Data.List                                 (sortBy)
 import           Data.Maybe                                (maybeToList)
+import           Data.Monoid                               ((<>))
 import           Data.Ord                                  (comparing)
 
 import           Control.Applicative
 import           Control.Arrow                             (second)
-import           Control.Monad                             (forM, forM_)
+import           Control.Monad                             (forM_)
 
 import           Data.Time.Calendar                        (Day)
 import           Data.Time.Clock                           (NominalDiffTime,
@@ -68,7 +69,7 @@ import           Control.Monad.IO.Class
 
 -- Chart stuff
 import           Data.Colour.SRGB                          (sRGB24read)
-import           Graphics.Rendering.Chart.Backend.Diagrams
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
 import           Graphics.Rendering.Chart.Easy
 
 import           Data.Csv                                  (defaultEncodeOptions,
@@ -92,8 +93,12 @@ import           Control.Concurrent
 import           Control.Concurrent.Async                  (async,
                                                             mapConcurrently,
                                                             wait)
-import           Control.Retry
-import           Data.IORef
+import           Control.Retry                             (fibonacciBackoff,
+                                                            limitRetries,
+                                                            retrying)
+import           Data.IORef                                (IORef, newIORef,
+                                                            readIORef,
+                                                            writeIORef)
 import           Data.Time.Units                           hiding (Day)
 import           GHC.Conc.Sync                             (getNumProcessors)
 
