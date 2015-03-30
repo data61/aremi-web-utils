@@ -88,16 +88,15 @@ import           System.Log.Logger.TH                      (deriveLoggers)
 
 
 import           Control.Concurrent
-import           Control.Concurrent.Async
+import           Control.Concurrent.Async                  (async,
+                                                            mapConcurrently,
+                                                            wait)
 import           Control.Retry
 import           Data.IORef
 import           Data.Time.Units                           hiding (Day)
-import           GHC.Conc.Sync                             (getNumProcessors,
-                                                            setNumCapabilities)
+import           GHC.Conc.Sync                             (getNumProcessors)
 
 import           System.Remote.Monitoring
-
-import           System.Mem                                (performMajorGC)
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
@@ -269,8 +268,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
             let !allsvg = SvgBS $ unchunkBS allsvg'
 
+            ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
-            ssvgs <- liftIO $ forM states $ \(sname,_) -> do
                         chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
                     (ssvg',_) <- renderableToSVGString chart 800 400
                     let !ssvg = SvgBS $ unchunkBS ssvg'
