@@ -14,6 +14,7 @@ import           Data.Maybe                                (maybeToList)
 import           Data.Ord                                  (comparing)
 
 import           Control.Applicative
+import           Control.Arrow                             (second)
 import           Control.Monad                             (forM, forM_)
 
 import           Data.Time.Calendar                        (Day)
@@ -44,6 +45,7 @@ import qualified Data.ByteString.Lazy                      as BSL
 
 import           Data.Text                                 (Text, unpack)
 import qualified Data.Text                                 as T
+import           Data.Text.Encoding                        (encodeUtf8)
 
 import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
@@ -67,6 +69,15 @@ import           Control.Monad.IO.Class
 import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Backend.Diagrams
 import           Graphics.Rendering.Chart.Easy
+
+import           Data.Csv                                  (defaultEncodeOptions,
+                                                            encodeByNameWith,
+                                                            toField)
+import qualified Data.Csv                                  as Csv
+-- import           Data.Vector                               (Vector)
+import qualified Data.Vector                               as V
+
+
 
 
 import           System.Log.Formatter                      (simpleLogFormatter)
@@ -167,10 +178,22 @@ main = do
                       Just (SvgBS bs) -> do
                           setHeader "Content-Type" "image/svg+xml"
                           raw bs
-            get ("contribution/:state/csv") $ do
-                next
+            get ("/contribution/csv") $ do
+                debugM "Contribution hit"
+                current <- liftIO $ readIORef ref
+                case _contributionCSV current of
+                    Nothing -> next
+                    Just (CsvBS bs) -> do
+                        setHeader "Content-Type" "text/csv"
+                        raw bs
+            get ("/performance/csv") $ do
+                current <- liftIO $ readIORef ref
+                case _performanceCSV current of
+                    Nothing -> next
+                    Just (CsvBS bs) -> do
+                        setHeader "Content-Type" "text/csv"
+                        raw bs
 
--- (ZonedTime, Maybe CsvBS, HashMap Text SvgBS)
 updateRef :: Int -> IORef AppState -> IO Bool
 updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> return False) $ do
     now <- getZonedTime
@@ -189,8 +212,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
             allPerfSvgs' <- async $ renderCharts (fetched, jsn) tz "performance"  _Double
             allContSvgs' <- async $ renderCharts (fetched, jsn) tz "contribution" (_String . unpacked . _Show)
 
-            allPerfSvgs <- wait allPerfSvgs'
-            allContSvgs <- wait allContSvgs'
+            (allPerfSvgs,perfCSV) <- wait allPerfSvgs'
+            (allContSvgs,contCSV) <- wait allContSvgs'
 
             let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
 
@@ -198,6 +221,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
             let !newState = current
                     & contributionGraphs .~ H.fromList allContSvgs
+                    & performanceCSV     .~ Just perfCSV
+                    & contributionCSV    .~ Just contCSV
                     & performanceGraphs  .~ H.fromList allPerfSvgs
                     & timeFetched        .~ Just now
                     & latestETag         .~ (metag <|> current ^. latestETag)
@@ -208,7 +233,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
     where
         renderCharts :: (UTCTime,Value) -> TimeZone -> Text
                      -> Prism' Value Double
-                     -> IO [(Text,SvgBS)]
+                     -> IO ([(Text,SvgBS)],CsvBS)
         renderCharts (fetched,jsn) tz title lns = do
             let
                 vals :: [Value]
@@ -226,19 +251,35 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 allChart :: Renderable ()
                 allChart = createContributionChart tz allTitle allStates
 
+                csvHeader :: Csv.Header
+                csvHeader = V.fromList [encodeUtf8 title,"State","Time"] :: V.Vector S.ByteString
+
+                currentValues :: [(Text,Maybe (UTCTime, Double))]
+                currentValues = map (second maximum) allStates
+
+                namedRecords = map (\(state, Just (time, val))
+                                    -> H.fromList [("State", toField $ lookup state states)
+                                                  ,("Time", toField $ formatTime defaultTimeLocale "%FT%X" time)
+                                                  ,(encodeUtf8 title, toField val)]
+                                    )
+                                    currentValues
+                csv = encodeByNameWith defaultEncodeOptions csvHeader namedRecords
+
             debugM $ "Rendering " ++ titleStr ++ " SVGs"
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
             let !allsvg = SvgBS $ unchunkBS allsvg'
 
-            ssvgs <- liftIO $ forM states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
+            ssvgs <- liftIO $ forM states $ \(sname,_) -> do
                         chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
                     (ssvg',_) <- renderableToSVGString chart 800 400
                     let !ssvg = SvgBS $ unchunkBS ssvg'
                     return (sname, ssvg)
             debugM $ "Done rendering " ++ titleStr ++ " SVGs"
 
-            return $ ("all",allsvg):ssvgs
+
+
+            return $ (("all",allsvg):ssvgs,CsvBS csv)
 
 
 unchunkBS :: ByteString -> ByteString
