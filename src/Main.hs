@@ -46,6 +46,7 @@ import           Data.ByteString.Lazy                      (ByteString)
 import qualified Data.ByteString.Lazy                      as BSL
 
 import           Data.Text                                 (Text, unpack)
+import qualified Data.Text.Lazy as TL
 import qualified Data.Text                                 as T
 import           Data.Text.Encoding                        (encodeUtf8)
 
@@ -115,9 +116,9 @@ type ETag = S.ByteString
 data AppState = AppState {
       _timeFetched        :: !(Maybe ZonedTime)
     , _latestETag         :: !(Maybe ETag)
-    , _contributionCSV    :: !(Maybe CsvBS)
+    , _contributionCSV    :: Text -> Maybe CsvBS
     , _contributionGraphs :: !(HashMap Text SvgBS)
-    , _performanceCSV     :: !(Maybe CsvBS)
+    , _performanceCSV     :: Text -> Maybe CsvBS
     , _performanceGraphs  :: !(HashMap Text SvgBS)
 }
 
@@ -128,9 +129,9 @@ instance Default AppState where
     def = AppState {
         _timeFetched        = Nothing,
         _latestETag         = Nothing,
-        _contributionCSV    = Nothing,
+        _contributionCSV    = const Nothing,
         _contributionGraphs = H.empty,
-        _performanceCSV     = Nothing,
+        _performanceCSV     = const Nothing,
         _performanceGraphs  = H.empty
     }
 
@@ -187,14 +188,17 @@ main = do
                           raw bs
             get ("/contribution/csv") $ do
                 current <- liftIO $ readIORef ref
-                case _contributionCSV current of
+                mhost <- header "Host"
+                liftIO $ print mhost
+                case mhost >>= \hst -> _contributionCSV current (TL.toStrict hst) of
                     Nothing -> next
                     Just (CsvBS bs) -> do
                         setHeader "Content-Type" "text/csv"
                         raw bs
             get ("/performance/csv") $ do
                 current <- liftIO $ readIORef ref
-                case _performanceCSV current of
+                mhost <- header "Host"
+                case mhost >>= \hst -> _performanceCSV current (TL.toStrict hst) of
                     Nothing -> next
                     Just (CsvBS bs) -> do
                         setHeader "Content-Type" "text/csv"
@@ -229,8 +233,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
             let !newState = current
                     & contributionGraphs .~ H.fromList allContSvgs
-                    & performanceCSV     .~ Just perfCSV
-                    & contributionCSV    .~ Just contCSV
+                    & performanceCSV     .~ perfCSV
+                    & contributionCSV    .~ contCSV
                     & performanceGraphs  .~ H.fromList allPerfSvgs
                     & timeFetched        .~ Just now
                     & latestETag         .~ (metag <|> current ^. latestETag)
@@ -241,7 +245,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
     where
         renderCharts :: (UTCTime,Value) -> TimeZone -> Text
                      -> Prism' Value Double
-                     -> IO ([(Text,SvgBS)],CsvBS)
+                     -> IO ([(Text,SvgBS)],Text -> Maybe CsvBS)
         renderCharts (fetched,jsn) tz title lns = do
             let
                 vals :: [Value]
@@ -265,33 +269,33 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 currentValues :: [(Text,Maybe (UTCTime, Double))]
                 currentValues = map (second maximum) allStates
 
-                namedRecords = map (\(state, Just (time, val))
+                namedRecords hst = map (\(state, Just (time, val))
                                     -> H.fromList [("State", toField $ lookup state states)
                                                   ,("Time", toField $ formatTime defaultTimeLocale "%FT%X" time)
                                                   ,(encodeUtf8 title, toField val)
-                                                  ,("Image", toField $ T.concat ["<img src='http://localhost:3000/"
+                                                  ,("Image", toField $ T.concat ["<img src='http://",hst,"/"
                                                                                 ,title,"/",state,"/svg'/>"])
                                                   ]
 
                                     )
                                     currentValues
-                csv = encodeByNameWith defaultEncodeOptions csvHeader namedRecords
+                csv hst = Just $ CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
 
             debugM $ "Rendering " ++ titleStr ++ " SVGs"
-            (allsvg',_) <- liftIO $ renderableToSVGString allChart 800 400
+            (allsvg',_) <- liftIO $ renderableToSVGString allChart 500 300
             let !allsvg = SvgBS $ unchunkBS allsvg'
 
             ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
                         chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
-                    (ssvg',_) <- renderableToSVGString chart 800 400
+                    (ssvg',_) <- renderableToSVGString chart 500 300
                     let !ssvg = SvgBS $ unchunkBS ssvg'
                     return (sname, ssvg)
             debugM $ "Done rendering " ++ titleStr ++ " SVGs"
 
 
 
-            return $ (("all",allsvg):ssvgs,CsvBS csv)
+            return $ (("all",allsvg):ssvgs,csv)
 
 
 unchunkBS :: ByteString -> ByteString
