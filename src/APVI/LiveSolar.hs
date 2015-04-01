@@ -12,6 +12,7 @@ module APVI.LiveSolar (
 	updateRef,
 	every,
 	isErr,
+    initialiseLiveSolar,
 	-- Lenses
 	contributionGraphs,
 	performanceGraphs,
@@ -108,9 +109,7 @@ import           Control.Concurrent.Async                  (async,
 import           Control.Retry                             (fibonacciBackoff,
                                                             limitRetries,
                                                             retrying)
--- import           Data.IORef                                (IORef, newIORef,
---                                                             readIORef,
---                                                             writeIORef)
+import           Data.IORef                                (newIORef)
 import           Data.Time.Units                           hiding (Day)
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
@@ -152,6 +151,18 @@ states = [
     ("tas",6),
     ("wa",5)
     ]
+
+initialiseLiveSolar :: IO (Either String (IORef AppState))
+initialiseLiveSolar = do
+    errorM "testing"
+    ref <- newIORef def
+
+    success <- updateRef 20 ref
+    if success
+        then do
+            _tid <- updateRef 10 ref `every` (5 :: Minute)
+            return $ Right ref
+        else return $ Left "Failed to initialise live solar data"
 
 -- Takes a number of retries and the current app state ref and attempts to contact APVI for the latest
 -- data for today.

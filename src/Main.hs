@@ -32,8 +32,7 @@ import           System.Log.Logger.TH          (deriveLoggers)
 
 import           Control.Concurrent
 
-import           Data.IORef                    (newIORef, readIORef)
-import           Data.Time.Units               hiding (Day)
+import           Data.IORef                    (readIORef)
 import           GHC.Conc.Sync                 (getNumProcessors)
 
 import           System.Remote.Monitoring
@@ -56,51 +55,49 @@ main = do
     h' <- fileHandler "all.log" HSL.DEBUG
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
     HSL.updateGlobalLogger "Main" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
+    HSL.updateGlobalLogger "APVI.LiveSolar" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
     infoM "apvi-webservice launch"
 
-    ref <- newIORef def
+    eref <- initialiseLiveSolar
 
-    success <- updateRef 20 ref
+    case eref of
+        Left err -> errorM err
+        Right ref -> do
 
-    if not success then errorM "Could not perform initial update"
-    else do
-        infoM "Successfully fetched today's data"
-        _tid <- updateRef 10 ref `every` (5 :: Minute)
-
-        scottyOpts def $ do
-            middleware simpleCors
-            get ( "/contribution/:state/svg") $ do
-                current <- liftIO $ readIORef ref
-                stat <- param "state" :: ActionM Text
-                case H.lookup stat (current ^. contributionGraphs) of
-                      Nothing -> next
-                      Just (SvgBS bs) -> do
-                          setHeader "Content-Type" "image/svg+xml"
-                          raw bs
-            get ( "/performance/:state/svg") $ do
-                current <- liftIO $ readIORef ref
-                stat <- param "state" :: ActionM Text
-                case H.lookup stat (current ^. performanceGraphs) of
-                      Nothing -> next
-                      Just (SvgBS bs) -> do
-                          setHeader "Content-Type" "image/svg+xml"
-                          raw bs
-            get ("/contribution/csv") $ do
-                current <- liftIO $ readIORef ref
-                mhost <- header "Host"
-                case mhost >>= \hst -> _contributionCSV current (TL.toStrict hst) of
-                    Nothing -> next
-                    Just (CsvBS bs) -> do
-                        setHeader "Content-Type" "text/csv"
-                        raw bs
-            get ("/performance/csv") $ do
-                current <- liftIO $ readIORef ref
-                mhost <- header "Host"
-                case mhost >>= \hst -> _performanceCSV current (TL.toStrict hst) of
-                    Nothing -> next
-                    Just (CsvBS bs) -> do
-                        setHeader "Content-Type" "text/csv"
-                        raw bs
+            scottyOpts def $ do
+                middleware simpleCors
+                get ( "/contribution/:state/svg") $ do
+                    current <- liftIO $ readIORef ref
+                    stat <- param "state" :: ActionM Text
+                    case H.lookup stat (current ^. contributionGraphs) of
+                          Nothing -> next
+                          Just (SvgBS bs) -> do
+                              setHeader "Content-Type" "image/svg+xml"
+                              raw bs
+                get ( "/performance/:state/svg") $ do
+                    current <- liftIO $ readIORef ref
+                    stat <- param "state" :: ActionM Text
+                    case H.lookup stat (current ^. performanceGraphs) of
+                          Nothing -> next
+                          Just (SvgBS bs) -> do
+                              setHeader "Content-Type" "image/svg+xml"
+                              raw bs
+                get ("/contribution/csv") $ do
+                    current <- liftIO $ readIORef ref
+                    mhost <- header "Host"
+                    case mhost >>= \hst -> _contributionCSV current (TL.toStrict hst) of
+                        Nothing -> next
+                        Just (CsvBS bs) -> do
+                            setHeader "Content-Type" "text/csv"
+                            raw bs
+                get ("/performance/csv") $ do
+                    current <- liftIO $ readIORef ref
+                    mhost <- header "Host"
+                    case mhost >>= \hst -> _performanceCSV current (TL.toStrict hst) of
+                        Nothing -> next
+                        Just (CsvBS bs) -> do
+                            setHeader "Content-Type" "text/csv"
+                            raw bs
 
 
 
