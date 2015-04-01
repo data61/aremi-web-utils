@@ -189,7 +189,6 @@ main = do
             get ("/contribution/csv") $ do
                 current <- liftIO $ readIORef ref
                 mhost <- header "Host"
-                liftIO $ print mhost
                 case mhost >>= \hst -> _contributionCSV current (TL.toStrict hst) of
                     Nothing -> next
                     Just (CsvBS bs) -> do
