@@ -6,41 +6,45 @@
 module Main where
 
 
-import           Network.Wai.Middleware.Cors   (simpleCors)
-import           Web.Scotty                    as S
+import           Network.Wai.Handler.Warp    (run)
+import           Network.Wai.Middleware.Cors (simpleCors)
 
-
-import           Control.Lens                  as L
-
-import           Data.Text                     (Text)
-import qualified Data.Text.Lazy                as TL
-
-import qualified Data.HashMap.Strict           as H
-
-
-import           Control.Monad.IO.Class
-
--- Chart stuff
-import           Graphics.Rendering.Chart.Easy
-
-import           System.Log.Formatter          (simpleLogFormatter)
-import           System.Log.Handler            (setFormatter)
+import           System.Log.Formatter        (simpleLogFormatter)
+import           System.Log.Handler          (setFormatter)
 import           System.Log.Handler.Simple
-import qualified System.Log.Logger             as HSL
-import           System.Log.Logger.TH          (deriveLoggers)
+import qualified System.Log.Logger           as HSL
+import           System.Log.Logger.TH        (deriveLoggers)
 
 
 import           Control.Concurrent
 
-import           Data.IORef                    (readIORef)
-import           GHC.Conc.Sync                 (getNumProcessors)
+import           GHC.Conc.Sync               (getNumProcessors)
 
-import           System.Remote.Monitoring
+import qualified System.Remote.Monitoring    as M
 
 import           APVI.LiveSolar
 
+import           Network.Wai
+import           Servant
+
+
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
+type App = APVILiveSolar
+
+appProxy :: Proxy App
+appProxy = Proxy
+
+
+appServer :: IO (Either String (Server App))
+appServer = do
+    ls <- makeLiveSolarServer
+    return ls
+
+
+makeMiddleware :: IO Middleware
+makeMiddleware = do
+    return (simpleCors)
 
 
 main :: IO ()
@@ -50,7 +54,7 @@ main = do
     -- remains responsive while producing new graphs.
     getNumProcessors >>= setNumCapabilities
 
-    forkServer "localhost" 8000
+    M.forkServer "localhost" 8000
 
     h' <- fileHandler "all.log" HSL.DEBUG
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
@@ -58,47 +62,12 @@ main = do
     HSL.updateGlobalLogger "APVI.LiveSolar" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
     infoM "apvi-webservice launch"
 
-    eref <- initialiseLiveSolar
+    appServ <- appServer
 
-    case eref of
+    case appServ of
         Left err -> errorM err
-        Right ref -> do
-
-            scottyOpts def $ do
-                middleware simpleCors
-                get ( "/contribution/:state/svg") $ do
-                    current <- liftIO $ readIORef ref
-                    stat <- param "state" :: ActionM Text
-                    case H.lookup stat (current ^. contributionGraphs) of
-                          Nothing -> next
-                          Just (SvgBS bs) -> do
-                              setHeader "Content-Type" "image/svg+xml"
-                              raw bs
-                get ( "/performance/:state/svg") $ do
-                    current <- liftIO $ readIORef ref
-                    stat <- param "state" :: ActionM Text
-                    case H.lookup stat (current ^. performanceGraphs) of
-                          Nothing -> next
-                          Just (SvgBS bs) -> do
-                              setHeader "Content-Type" "image/svg+xml"
-                              raw bs
-                get ("/contribution/csv") $ do
-                    current <- liftIO $ readIORef ref
-                    mhost <- header "Host"
-                    case mhost >>= \hst -> _contributionCSV current (TL.toStrict hst) of
-                        Nothing -> next
-                        Just (CsvBS bs) -> do
-                            setHeader "Content-Type" "text/csv"
-                            raw bs
-                get ("/performance/csv") $ do
-                    current <- liftIO $ readIORef ref
-                    mhost <- header "Host"
-                    case mhost >>= \hst -> _performanceCSV current (TL.toStrict hst) of
-                        Nothing -> next
-                        Just (CsvBS bs) -> do
-                            setHeader "Content-Type" "text/csv"
-                            raw bs
-
-
+        Right serv -> do
+            mids <- makeMiddleware
+            run 3000 $ mids $ serve appProxy serv
 
 

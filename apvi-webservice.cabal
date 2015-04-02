@@ -90,6 +90,9 @@ executable apvi-webservice
                        vector           >= 0.10 && < 0.11,
                        async            >= 2.0 && < 2.1,
                        wai-cors         >= 0.2 && < 0.3,
+                       servant-server   >= 0.2 && < 0.3,
+                       wai              >= 3.0 && < 3.1,
+                       blaze-builder    >= 0.3 && < 0.4,
                        ekg              >= 0.4 && < 0.5
 
   -- Directories containing source files.

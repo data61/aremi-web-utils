@@ -1,24 +1,33 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds         #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE TypeOperators     #-}
+
 
 module APVI.LiveSolar (
-	--Types
-	SvgBS(..),
-	CsvBS(..),
-	AppState(..),
-	--
-	updateRef,
-	every,
-	isErr,
+    -- Web interface
+    APVILiveSolar,
+    makeLiveSolarServer,
+    --Types
+    SvgBS(..),
+    CsvBS(..),
+    AppState(..),
+    --
+    updateRef,
+    every,
+    isErr,
     initialiseLiveSolar,
-	-- Lenses
-	contributionGraphs,
-	performanceGraphs,
-	contributionCSV,
-	performanceCSV
-	) where
+    -- Lenses
+    contributionGraphs,
+    performanceGraphs,
+    contributionCSV,
+    performanceCSV
+    ) where
 
 
 import           Data.List                                 (sortBy)
@@ -39,7 +48,9 @@ import qualified Data.ByteString.Lazy                      as BSL
 
 import           Data.Text                                 (Text, unpack)
 import qualified Data.Text                                 as T
-import           Data.Text.Encoding                        (encodeUtf8)
+
+import           Data.Text.Encoding                        (decodeUtf8',
+                                                            encodeUtf8)
 
 
 import           Data.HashMap.Strict                       (HashMap)
@@ -83,8 +94,7 @@ import qualified System.Log.Logger                         as HSL
 import           System.Log.Logger.TH                      (deriveLoggers)
 
 
-import           Data.IORef                                (IORef,
-                                                            readIORef,
+import           Data.IORef                                (IORef, readIORef,
                                                             writeIORef)
 
 import           Control.Monad.Catch                       (Handler (..),
@@ -100,7 +110,8 @@ import           Network.HTTP.Conduit                      (HttpException (Statu
                                                             responseBody,
                                                             responseHeaders,
                                                             withManager)
-import           Network.HTTP.Types.Status                 (Status (..))
+import           Network.HTTP.Types.Status                 (Status (..),
+                                                            status200)
 
 import           Control.Concurrent
 import           Control.Concurrent.Async                  (async,
@@ -111,6 +122,13 @@ import           Control.Retry                             (fibonacciBackoff,
                                                             retrying)
 import           Data.IORef                                (newIORef)
 import           Data.Time.Units                           hiding (Day)
+
+import           Blaze.ByteString.Builder                  (fromLazyByteString)
+import           Network.Wai                               (Application,
+                                                            requestHeaderHost,
+                                                            responseBuilder)
+import           Servant
+
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
 
@@ -152,9 +170,30 @@ states = [
     ("wa",5)
     ]
 
+type APVILiveSolar =
+    "performance" :>
+        ("csv" :> Raw
+        :<|> Capture "state" Text :> "svg" :> Raw)
+    :<|>
+    "contribution" :>
+        ("csv" :> Raw
+        :<|> Capture "state" Text :> "svg" :> Raw)
+
+makeLiveSolarServer :: IO (Either String (Server APVILiveSolar))
+makeLiveSolarServer = do
+    eref <- initialiseLiveSolar
+    case eref of
+        Left str -> return $ Left str
+        Right ref -> return $ Right (
+            (serveCSV ref performanceCSV
+                :<|> serveSVG ref performanceGraphs)
+            :<|> (serveCSV ref contributionCSV
+                :<|> serveSVG ref contributionGraphs)
+            )
+
+
 initialiseLiveSolar :: IO (Either String (IORef AppState))
 initialiseLiveSolar = do
-    errorM "testing"
     ref <- newIORef def
 
     success <- updateRef 20 ref
@@ -163,6 +202,40 @@ initialiseLiveSolar = do
             _tid <- updateRef 10 ref `every` (5 :: Minute)
             return $ Right ref
         else return $ Left "Failed to initialise live solar data"
+
+
+serveCSV :: IORef AppState -> Getter AppState (Text -> Maybe CsvBS) -> Application
+serveCSV ref lns req resp = do
+        current <- readIORef ref
+        let mhost = requestHeaderHost req
+        let makeCSV = case mhost of
+                Nothing -> Nothing
+                Just hbs -> case decodeUtf8' hbs of
+                    Left _err -> Nothing
+                    Right txt -> (current ^. lns) txt
+        case makeCSV of
+            Nothing -> error "TODO: fixme"
+            Just (CsvBS bs) -> do
+                resp $ responseBuilder
+                            status200
+                            [("Content-Type", "text/csv")]
+                            (fromLazyByteString bs)
+
+
+
+serveSVG :: IORef AppState -> Getter AppState (HashMap Text SvgBS) -> Text -> Application
+serveSVG ref lns stat _req resp = do
+    current <- readIORef ref
+
+    case H.lookup stat (current ^. lns) of
+              Nothing -> error "TODO: fixme"
+              Just (SvgBS bs) -> do
+                    resp $ responseBuilder
+                                status200
+                                [("Content-Type", "image/svg+xml")]
+                                (fromLazyByteString bs)
+
+
 
 -- Takes a number of retries and the current app state ref and attempts to contact APVI for the latest
 -- data for today.
