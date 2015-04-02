@@ -1,13 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Rank2Types        #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# OPTIONS_GHC -with-rtsopts=-T #-}
 
 module Main where
-
-
-import           Network.Wai.Handler.Warp             (run)
-import           Network.Wai.Middleware.Cors          (simpleCors)
 
 import           System.Log.Formatter                 (simpleLogFormatter)
 import           System.Log.Handler                   (setFormatter)
@@ -15,17 +10,20 @@ import           System.Log.Handler.Simple
 import qualified System.Log.Logger                    as HSL
 import           System.Log.Logger.TH                 (deriveLoggers)
 
-
-import           Control.Concurrent
-
-import           GHC.Conc.Sync                        (getNumProcessors)
+import           GHC.Conc.Sync                        (getNumProcessors,
+                                                       setNumCapabilities)
 
 import qualified System.Remote.Monitoring             as M
 
 import           APVI.LiveSolar
 
-import           Network.Wai
-import           Network.Wai.Middleware.RequestLogger
+import           Network.Wai                          (Middleware)
+import           Network.Wai.Handler.Warp             (run)
+import           Network.Wai.Middleware.Cors          (simpleCors)
+import           Network.Wai.Middleware.RequestLogger (Destination (..),
+                                                       IPAddrSource (..),
+                                                       OutputFormat (..), RequestLoggerSettings (..),
+                                                       mkRequestLogger)
 import           Servant
 import           System.IO                            (BufferMode (..),
                                                        IOMode (..),
@@ -51,7 +49,9 @@ makeMiddleware :: IO Middleware
 makeMiddleware = do
     h <- openFile "access.log" AppendMode
     hSetBuffering h NoBuffering
-    accessLogger <- mkRequestLogger (def {destination = Handle h, outputFormat = Apache FromFallback, autoFlush = True})
+    accessLogger <- mkRequestLogger (def {destination = Handle h
+                                         ,outputFormat = Apache FromFallback
+                                         ,autoFlush = True})
     return (accessLogger . simpleCors)
     -- return (logStdoutDev . simpleCors)
     -- return (simpleCors)
