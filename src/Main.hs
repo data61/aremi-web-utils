@@ -6,27 +6,32 @@
 module Main where
 
 
-import           Network.Wai.Handler.Warp    (run)
-import           Network.Wai.Middleware.Cors (simpleCors)
+import           Network.Wai.Handler.Warp             (run)
+import           Network.Wai.Middleware.Cors          (simpleCors)
 
-import           System.Log.Formatter        (simpleLogFormatter)
-import           System.Log.Handler          (setFormatter)
+import           System.Log.Formatter                 (simpleLogFormatter)
+import           System.Log.Handler                   (setFormatter)
 import           System.Log.Handler.Simple
-import qualified System.Log.Logger           as HSL
-import           System.Log.Logger.TH        (deriveLoggers)
+import qualified System.Log.Logger                    as HSL
+import           System.Log.Logger.TH                 (deriveLoggers)
 
 
 import           Control.Concurrent
 
-import           GHC.Conc.Sync               (getNumProcessors)
+import           GHC.Conc.Sync                        (getNumProcessors)
 
-import qualified System.Remote.Monitoring    as M
+import qualified System.Remote.Monitoring             as M
 
 import           APVI.LiveSolar
 
 import           Network.Wai
+import           Network.Wai.Middleware.RequestLogger
 import           Servant
+import           System.IO                            (BufferMode (..),
+                                                       IOMode (..),
+                                                       hSetBuffering, openFile)
 
+import           Data.Default
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
@@ -44,7 +49,12 @@ appServer = do
 
 makeMiddleware :: IO Middleware
 makeMiddleware = do
-    return (simpleCors)
+    h <- openFile "access.log" AppendMode
+    hSetBuffering h NoBuffering
+    accessLogger <- mkRequestLogger (def {destination = Handle h, outputFormat = Apache FromFallback, autoFlush = True})
+    return (accessLogger . simpleCors)
+    -- return (logStdoutDev . simpleCors)
+    -- return (simpleCors)
 
 
 main :: IO ()
