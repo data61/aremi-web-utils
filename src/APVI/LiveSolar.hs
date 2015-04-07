@@ -124,10 +124,9 @@ import           Control.Retry                             (fibonacciBackoff,
 import           Data.IORef                                (newIORef)
 import           Data.Time.Units                           hiding (Day)
 
-import           Blaze.ByteString.Builder                  (fromLazyByteString)
 import           Network.Wai                               (Application,
-                                                            requestHeaderHost,
-                                                            responseBuilder)
+                                                            requestHeaderHost)
+import Network.Wai.Util
 import           Servant
 import           Servant.Docs
 
@@ -213,7 +212,7 @@ initialiseLiveSolar = do
 
 
 serveCSV :: IORef AppState -> Getter AppState (Text -> Maybe CsvBS) -> Application
-serveCSV ref lns req resp = do
+serveCSV ref lns req respond = do
         current <- readIORef ref
         let mhost = requestHeaderHost req
         let makeCSV = case mhost of
@@ -224,24 +223,19 @@ serveCSV ref lns req resp = do
         case makeCSV of
             Nothing -> error "TODO: fixme"
             Just (CsvBS bs) -> do
-                resp $ responseBuilder
-                            status200
-                            [("Content-Type", "text/csv")]
-                            (fromLazyByteString bs)
+                respond =<< bytestring status200 [("Content-Type", "text/csv")] bs
+
 
 
 
 serveSVG :: IORef AppState -> Getter AppState (HashMap Text SvgBS) -> Text -> Application
-serveSVG ref lns stat _req resp = do
+serveSVG ref lns stat _req respond = do
     current <- readIORef ref
 
     case H.lookup stat (current ^. lns) of
               Nothing -> error "TODO: fixme"
               Just (SvgBS bs) -> do
-                    resp $ responseBuilder
-                                status200
-                                [("Content-Type", "image/svg+xml")]
-                                (fromLazyByteString bs)
+                    respond =<< bytestring status200 [("Content-Type", "image/svg+xml")] bs
 
 
 
