@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds         #-}
 {-# LANGUAGE RankNTypes        #-}
@@ -30,9 +31,9 @@ module APVI.LiveSolar (
     ) where
 
 
-import           Data.List                                 (sortBy)
+import           Data.List                                 (intercalate, sortBy)
 import           Data.Maybe                                (maybeToList)
-import           Data.Monoid                               ((<>))
+-- import           Data.Monoid                               ((<>))
 import           Data.Ord                                  (comparing)
 
 import           Control.Applicative
@@ -128,6 +129,7 @@ import           Network.Wai                               (Application,
                                                             requestHeaderHost,
                                                             responseBuilder)
 import           Servant
+import           Servant.Docs
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
@@ -173,11 +175,17 @@ states = [
 type APVILiveSolar =
     "performance" :>
         ("csv" :> Raw
-        :<|> Capture "state" Text :> "svg" :> Raw)
+        :<|> Capture "svgstate" Text :> "svg" :> Raw)
     :<|>
     "contribution" :>
         ("csv" :> Raw
-        :<|> Capture "state" Text :> "svg" :> Raw)
+        :<|> Capture "svgstate" Text :> "svg" :> Raw)
+
+
+instance ToCapture (Capture "svgstate" Text) where
+    toCapture _ = DocCapture "svgstate" $
+        "Australian State name, currently supported are: all, "
+        ++ intercalate ", " (map (T.unpack . fst) states)
 
 makeLiveSolarServer :: IO (Either String (Server APVILiveSolar))
 makeLiveSolarServer = do
