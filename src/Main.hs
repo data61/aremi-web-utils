@@ -1,5 +1,7 @@
+{-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeOperators     #-}
 {-# OPTIONS_GHC -with-rtsopts=-T #-}
 
 module Main where
@@ -15,8 +17,6 @@ import           GHC.Conc.Sync                        (getNumProcessors,
 
 import qualified System.Remote.Monitoring             as M
 
-import           APVI.LiveSolar
-
 import           Network.Wai                          (Middleware)
 import           Network.Wai.Handler.Warp             (run)
 import           Network.Wai.Middleware.Cors          (simpleCors)
@@ -24,25 +24,35 @@ import           Network.Wai.Middleware.RequestLogger (Destination (..),
                                                        IPAddrSource (..),
                                                        OutputFormat (..), RequestLoggerSettings (..),
                                                        mkRequestLogger)
+import           Network.Wai.Util                      (replaceHeader)
 import           Servant
 import           System.IO                            (BufferMode (..),
                                                        IOMode (..),
                                                        hSetBuffering, openFile)
 
+import           Control.Monad.Trans.Either
+
 import           Data.Default
+
+import           APVI.LiveSolar
+
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
 type App = APVILiveSolar
+      :<|> "static" :> Raw
 
 appProxy :: Proxy App
 appProxy = Proxy
 
 
-appServer :: IO (Either String (Server App))
+appServer :: EitherT String IO (Server App)
 appServer = do
-    ls <- makeLiveSolarServer
-    return ls
+    ls <- EitherT $ makeLiveSolarServer :: EitherT String IO (Server APVILiveSolar)
+    return $ ls :<|> serveDirectory "static"
+    where
+        addCorsHeader :: Middleware
+        addCorsHeader app req respond = app req (respond . replaceHeader ("Access-Control-Allow-Origin","*"))
 
 
 makeMiddleware :: IO Middleware
@@ -72,7 +82,7 @@ main = do
     HSL.updateGlobalLogger "APVI.LiveSolar" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
     infoM "apvi-webservice launch"
 
-    appServ <- appServer
+    appServ <- runEitherT appServer
 
     case appServ of
         Left err -> errorM err
