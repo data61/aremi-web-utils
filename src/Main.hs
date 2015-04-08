@@ -39,7 +39,7 @@ import           APVI.LiveSolar
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
-type App = APVILiveSolar
+type App = "apvi" :> APVILiveSolar
       :<|> "static" :> Raw
 
 appProxy :: Proxy App

@@ -308,7 +308,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                     -> H.fromList [("State", toField $ lookup state states)
                                                   ,("Time", toField $ formatTime defaultTimeLocale "%FT%X" time)
                                                   ,(encodeUtf8 title, toField val)
-                                                  ,("Image", toField $ T.concat ["<img src='http://",hst,"/"
+                                                  ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
                                                                                 ,title,"/",state,"/svg'/>"])
                                                   ]
 
