@@ -167,8 +167,9 @@ states = [
     ("vic",2),
     ("qld",3),
     ("sa",4),
+    ("wa",5),
     ("tas",6),
-    ("wa",5)
+    ("nt",7)
     ]
 
 type APVILiveSolar =
@@ -306,6 +307,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
                 namedRecords hst = map (\(state, Just (time, val))
                                     -> H.fromList [("State", toField $ lookup state states)
+                                                  ,("State name", toField state)
                                                   ,("Time", toField $ formatTime defaultTimeLocale "%FT%X" time)
                                                   ,(encodeUtf8 title, toField val)
                                                   ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
