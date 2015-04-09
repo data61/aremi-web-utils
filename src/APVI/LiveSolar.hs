@@ -102,6 +102,7 @@ import           Control.Monad.Catch                       (Handler (..),
                                                             SomeException,
                                                             catch, catches)
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Either
 
 
 import           Network.HTTP.Conduit                      (HttpException (StatusCodeException),
@@ -126,7 +127,7 @@ import           Data.Time.Units                           hiding (Day)
 
 import           Network.Wai                               (Application,
                                                             requestHeaderHost)
-import Network.Wai.Util
+import           Network.Wai.Util
 import           Servant
 import           Servant.Docs
 
@@ -140,12 +141,14 @@ type ETag = S.ByteString
 
 
 data AppState = AppState {
-      _timeFetched        :: !(Maybe ZonedTime)
-    , _latestETag         :: !(Maybe ETag)
-    , _contributionCSV    :: Text -> Maybe CsvBS
-    , _contributionGraphs :: !(HashMap Text SvgBS)
-    , _performanceCSV     :: Text -> Maybe CsvBS
-    , _performanceGraphs  :: !(HashMap Text SvgBS)
+      _timeFetched           :: !(Maybe ZonedTime)
+    , _latestETag            :: !(Maybe ETag)
+    , _contributionCSV       :: Text -> Maybe CsvBS
+    , _contributionGraphs    :: !(HashMap Text SvgBS)
+    , _performanceCSV        :: Text -> Maybe CsvBS
+    , _performanceGraphs     :: !(HashMap Text SvgBS)
+    , _performanceGraphJSON  :: Value
+    , _contributionGraphJSON :: Value
 }
 
 $(makeLenses ''AppState)
@@ -158,7 +161,9 @@ instance Default AppState where
         _contributionCSV    = const Nothing,
         _contributionGraphs = H.empty,
         _performanceCSV     = const Nothing,
-        _performanceGraphs  = H.empty
+        _performanceGraphs  = H.empty,
+        _performanceGraphJSON = A.Array empty,
+        _contributionGraphJSON = A.Array empty
     }
 
 states :: [(Text, Int)]
@@ -175,11 +180,13 @@ states = [
 type APVILiveSolar =
     "performance" :>
         ("csv" :> Raw
-        :<|> Capture "svgstate" Text :> "svg" :> Raw)
+        :<|> Capture "svgstate" Text :> "svg" :> Raw
+        :<|> "json" :> Get Value)
     :<|>
     "contribution" :>
         ("csv" :> Raw
-        :<|> Capture "svgstate" Text :> "svg" :> Raw)
+        :<|> Capture "svgstate" Text :> "svg" :> Raw
+        :<|> "json" :> Get Value)
 
 
 instance ToCapture (Capture "svgstate" Text) where
@@ -194,9 +201,11 @@ makeLiveSolarServer = do
         Left str -> return $ Left str
         Right ref -> return $ Right (
             (serveCSV ref performanceCSV
-                :<|> serveSVG ref performanceGraphs)
+                :<|> serveSVG ref performanceGraphs
+                :<|> serveJSON ref performanceGraphJSON)
             :<|> (serveCSV ref contributionCSV
-                :<|> serveSVG ref contributionGraphs)
+                :<|> serveSVG ref contributionGraphs
+                :<|> serveJSON ref contributionGraphJSON)
             )
 
 
@@ -238,7 +247,10 @@ serveSVG ref lns stat _req respond = do
               Just (SvgBS bs) -> do
                     respond =<< bytestring status200 [("Content-Type", "image/svg+xml")] bs
 
-
+serveJSON :: IORef AppState -> Getter AppState Value -> EitherT (Int,String) IO Value
+serveJSON ref lns = do
+    current <- liftIO $ readIORef ref
+    return (current ^. lns)
 
 -- Takes a number of retries and the current app state ref and attempts to contact APVI for the latest
 -- data for today.
@@ -257,23 +269,29 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
         Err err -> errorM err >> return False
         NoChange -> debugM "update not necessary" >> return True
         NewData metag (fetched, jsn) -> do
-            allPerfSvgs' <- async $ renderCharts (fetched, jsn) tz "performance"  _Double
-            allContSvgs' <- async $ renderCharts (fetched, jsn) tz "contribution" (_String . unpacked . _Show)
+            allPerfSvgs' <- async $ renderCharts (fetched, jsn) tz "performance"
+                                                 _Double
+                                                 $ "ts" : map fst states
+            allContSvgs' <- async $ renderCharts (fetched, jsn) tz "contribution"
+                                                 (_String . unpacked . _Show)
+                                                 $ ("ts":) . filter (\s -> s /="wa" && s /= "nt") . map fst $ states
 
-            (allPerfSvgs,perfCSV) <- wait allPerfSvgs'
-            (allContSvgs,contCSV) <- wait allContSvgs'
+            (allPerfSvgs, perfCSV, perfJSON) <- wait allPerfSvgs'
+            (allContSvgs, contCSV, contJSON) <- wait allContSvgs'
 
             let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
 
             debugM $ "Total SVG size: " ++ show svgSize
 
             let !newState = current
-                    & contributionGraphs .~ H.fromList allContSvgs
-                    & performanceCSV     .~ perfCSV
-                    & contributionCSV    .~ contCSV
-                    & performanceGraphs  .~ H.fromList allPerfSvgs
-                    & timeFetched        .~ Just now
-                    & latestETag         .~ (metag <|> current ^. latestETag)
+                    & contributionGraphs    .~ H.fromList allContSvgs
+                    & performanceGraphs     .~ H.fromList allPerfSvgs
+                    & performanceCSV        .~ perfCSV
+                    & contributionCSV       .~ contCSV
+                    & performanceGraphJSON  .~ perfJSON
+                    & contributionGraphJSON .~ contJSON
+                    & timeFetched           .~ Just now
+                    & latestETag            .~ (metag <|> current ^. latestETag)
 
             liftIO . writeIORef ref $ newState
             -- performMajorGC
@@ -281,8 +299,9 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
     where
         renderCharts :: (UTCTime,Value) -> TimeZone -> Text
                      -> Prism' Value Double
-                     -> IO ([(Text,SvgBS)],Text -> Maybe CsvBS)
-        renderCharts (fetched,jsn) tz title lns = do
+                     -> [Text] -- Column name, column type for Google Charts
+                     -> IO ([(Text,SvgBS)],Text -> Maybe CsvBS, Value)
+        renderCharts (fetched,jsn) tz title lns cols = do
             let
                 vals :: [Value]
                 vals = jsn ^.. key title . values
@@ -299,8 +318,20 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 allChart :: Renderable ()
                 allChart = createContributionChart tz allTitle allStates
 
-                csvHeader :: Csv.Header
-                csvHeader = V.fromList [encodeUtf8 title,"State","Time","Image"] :: V.Vector S.ByteString
+            debugM $ "Rendering " ++ titleStr ++ " SVGs"
+            (allsvg',_) <- liftIO $ renderableToSVGString allChart 500 300
+            let !allsvg = SvgBS $ unchunkBS allsvg'
+
+            ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
+                    let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
+                        chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
+                    (ssvg',_) <- renderableToSVGString chart 500 300
+                    let !ssvg = SvgBS $ unchunkBS ssvg'
+                    return (sname, ssvg)
+            debugM $ "Done rendering " ++ titleStr ++ " SVGs"
+
+            let csvHeader :: Csv.Header
+                csvHeader = V.fromList [encodeUtf8 title,"State", "State name","Time","Image"] :: V.Vector S.ByteString
 
                 currentValues :: [(Text,Maybe (UTCTime, Double))]
                 currentValues = map (second maximum) allStates
@@ -318,21 +349,16 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                     currentValues
                 csv hst = Just $ CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
 
-            debugM $ "Rendering " ++ titleStr ++ " SVGs"
-            (allsvg',_) <- liftIO $ renderableToSVGString allChart 500 300
-            let !allsvg = SvgBS $ unchunkBS allsvg'
+            -- Produce json values for google chart
+            let jsonData = A.toJSON $ -- (Just A.Null :
+                                    (map (Just . A.toJSON) (drop 0 cols))
+                                    : map (f cols) vals
 
-            ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
-                    let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
-                        chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
-                    (ssvg',_) <- renderableToSVGString chart 500 300
-                    let !ssvg = SvgBS $ unchunkBS ssvg'
-                    return (sname, ssvg)
-            debugM $ "Done rendering " ++ titleStr ++ " SVGs"
+                f cls obj = map (\col -> obj ^? key col) cls
 
 
 
-            return $ (("all",allsvg):ssvgs,csv)
+            return $ (("all",allsvg):ssvgs,csv, jsonData)
 
 
 unchunkBS :: ByteString -> ByteString
