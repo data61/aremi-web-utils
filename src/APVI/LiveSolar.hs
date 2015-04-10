@@ -356,9 +356,14 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
                 f cls obj = map (\col -> obj ^? key col) cls
 
+                jsonData2 = A.toJSON $
+                    ((Just "ts") : [val ^? key "ts" | val <- vals]) :
+                    [Just (A.toJSON col) : [ val ^? key col | val <- vals] | col <- drop 1 cols]
 
 
-            return $ (("all",allsvg):ssvgs,csv, jsonData)
+
+            -- liftIO $ print jsonData2
+            return $ (("all",allsvg):ssvgs,csv, jsonData2)
 
 
 unchunkBS :: ByteString -> ByteString

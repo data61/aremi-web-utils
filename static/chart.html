@@ -9,15 +9,17 @@
   <!-- <script src='http://code.highcharts.com/highcharts.js'></script> -->
   <!-- <script type="text/javascript" src="https://www.google.com/jsapi"></script> -->
   <script type="text/javascript">
-    $(document).ready(function(){
-
-      $.getJSON("/apvi/contribution/json", function (dat) {
+    function createChart (url,bind) {
+      $.getJSON(url, function (dat) {
         var chart = c3.generate({
-          bindto: '#contribution',
+          bindto: bind,
           data: {
             x: 'ts',
             xFormat: '%Y-%m-%dT%H:%M:%SZ',
-            rows: dat
+            columns: dat,
+            // onmouseover: function (d) {
+            //   console.log(d.id, d.value);
+            // }
           },
           axis: {
             x: {
@@ -26,28 +28,21 @@
                 format: '%H:%M'
               }
             }
+          },
+          legend: {
+            position: 'right'
+          },
+          subchart: {
+            show: true
           }
         });
-
-        $.getJSON("/apvi/performance/json", function (dat) {
-          var chart = c3.generate({
-            bindto: '#performance',
-            data: {
-              x: 'ts',
-              xFormat: '%Y-%m-%dT%H:%M:%SZ',
-              rows: dat
-            },
-            axis: {
-              x: {
-                type: 'timeseries',
-                tick: {
-                  format: '%H:%M'
-                }
-              }
-            }
-          });
-        });
       });
+
+
+    };
+    $(document).ready(function(){
+      createChart("/apvi/contribution/json",'#contribution');
+      createChart("/apvi/performance/json",'#performance');
     });
 
   </script>
