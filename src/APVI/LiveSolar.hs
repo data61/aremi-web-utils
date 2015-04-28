@@ -336,11 +336,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 currentValues :: [(Text,Maybe (UTCTime, Double))]
                 currentValues = map (second maximum) allStates
 
-                namedRecords hst = map (\(state, Just (time, val))
+                namedRecords hst = map (\(state, mtv)
                                     -> H.fromList [("State", toField $ lookup state states)
                                                   ,("State name", toField state)
-                                                  ,("Time", toField $ formatTime defaultTimeLocale "%FT%X" time)
-                                                  ,(encodeUtf8 title, toField val)
+                                                  ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
+                                                  ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
                                                   ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
                                                                                 ,title,"/",state,"/svg'/>"])
                                                   ]
