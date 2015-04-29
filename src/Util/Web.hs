@@ -26,10 +26,11 @@ import           Control.Monad.Trans.Either
 
 import           Util.Types
 
+import Data.Functor ((<$>))
 
 
 
-serveCSV :: IORef a -> Getter a (Text -> Maybe CsvBS) -> Application
+serveCSV :: IORef a -> Getter a (Maybe (Text -> CsvBS)) -> Application
 serveCSV ref lns req respond = do
         current <- readIORef ref
         let mhost = requestHeaderHost req
@@ -37,7 +38,7 @@ serveCSV ref lns req respond = do
                 Nothing -> Nothing
                 Just hbs -> case decodeUtf8' hbs of
                     Left _err -> Nothing
-                    Right txt -> (current ^. lns) txt
+                    Right txt -> ($ txt) <$> (current ^. lns)
         case makeCSV of
             Nothing -> error "TODO: fixme"
             Just (CsvBS bs) -> do

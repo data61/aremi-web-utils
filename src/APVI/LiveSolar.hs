@@ -134,9 +134,9 @@ $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
 data AppState = AppState {
       _timeFetched           :: !(Maybe ZonedTime)
     , _latestETag            :: !(Maybe ETag)
-    , _contributionCSV       :: Text -> Maybe CsvBS
+    , _contributionCSV       :: Maybe (Text -> CsvBS)
     , _contributionGraphs    :: !(HashMap Text SvgBS)
-    , _performanceCSV        :: Text -> Maybe CsvBS
+    , _performanceCSV        :: Maybe (Text -> CsvBS)
     , _performanceGraphs     :: !(HashMap Text SvgBS)
     , _performanceGraphJSON  :: Value
     , _contributionGraphJSON :: Value
@@ -149,9 +149,9 @@ instance Default AppState where
     def = AppState {
         _timeFetched        = Nothing,
         _latestETag         = Nothing,
-        _contributionCSV    = const Nothing,
+        _contributionCSV    = Nothing,
         _contributionGraphs = H.empty,
-        _performanceCSV     = const Nothing,
+        _performanceCSV     = Nothing,
         _performanceGraphs  = H.empty,
         _performanceGraphJSON = A.Array empty,
         _contributionGraphJSON = A.Array empty
@@ -236,8 +236,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                                  (_String . unpacked . _Show)
                                                  $ ("ts":) . filter (\s -> s /="wa" && s /= "nt") . map fst $ states
 
-            (allPerfSvgs, perfCSV, perfJSON) <- wait allPerfSvgs'
-            (allContSvgs, contCSV, contJSON) <- wait allContSvgs'
+            (allPerfSvgs, perfJSON, perfCSV) <- wait allPerfSvgs'
+            (allContSvgs, contJSON, contCSV) <- wait allContSvgs'
 
             let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
 
@@ -246,8 +246,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
             let !newState = current
                     & contributionGraphs    .~ H.fromList allContSvgs
                     & performanceGraphs     .~ H.fromList allPerfSvgs
-                    & performanceCSV        .~ perfCSV
-                    & contributionCSV       .~ contCSV
+                    & performanceCSV        .~ Just perfCSV
+                    & contributionCSV       .~ Just contCSV
                     & performanceGraphJSON  .~ perfJSON
                     & contributionGraphJSON .~ contJSON
                     & timeFetched           .~ Just now
@@ -260,7 +260,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
         renderCharts :: (UTCTime,Value) -> TimeZone -> Text
                      -> Prism' Value Double
                      -> [Text] -- Column name, column type for Google Charts
-                     -> IO ([(Text,SvgBS)],Text -> Maybe CsvBS, Value)
+                     -> IO ([(Text,SvgBS)], Value, Text -> CsvBS)
         renderCharts (fetched,jsn) tz title lns cols = do
             let
                 vals :: [Value]
@@ -298,42 +298,37 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     return (sname, ssvg)
             debugM $ "Done rendering " ++ titleStr ++ " SVGs"
 
+
+
+            -- Produce json values for google chart
+            let jsonData2 = A.toJSON $
+                    ((Just "ts") : [val ^? key "ts" | val <- vals]) :
+                    [Just (A.toJSON col) : [ val ^? key col | val <- vals] | col <- drop 1 cols]
+
+            return $ (("all",allsvg):ssvgs, jsonData2, renderCSVs title allStates)
+
+        renderCSVs :: Text -> [(Text,[Maybe (UTCTime,Double)])] -> (Text -> CsvBS)
+        renderCSVs title allStates =
             let csvHeader :: Csv.Header
                 csvHeader = V.fromList [encodeUtf8 title,"State", "State name","Time","Image"] :: V.Vector S.ByteString
 
                 currentValues :: [(Text,Maybe (UTCTime, Double))]
                 currentValues = map (second maximum) allStates
 
-                namedRecords hst = map (\(state, mtv)
-                                    -> H.fromList [("State", toField $ lookup state states)
-                                                  ,("State name", toField state)
-                                                  ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
-                                                  ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
-                                                  ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
-                                                                                ,title,"/",state,"/svg'/>"])
-                                                  ]
-
-                                    )
-                                    currentValues
-                csv hst = Just $ CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
-
-            -- Produce json values for google chart
-            let
-                -- jsonData = A.toJSON $ -- (Just A.Null :
-                --                     (map (Just . A.toJSON) (drop 0 cols))
-                --                     : map (f cols) vals
-
-                -- f cls obj = map (\col -> obj ^? key col) cls
-
-                jsonData2 = A.toJSON $
-                    ((Just "ts") : [val ^? key "ts" | val <- vals]) :
-                    [Just (A.toJSON col) : [ val ^? key col | val <- vals] | col <- drop 1 cols]
-
-
-
-            -- liftIO $ print jsonData2
-            return $ (("all",allsvg):ssvgs,csv, jsonData2)
-
+                namedRecords hst =
+                    map (\(state, mtv)
+                        -> H.fromList [
+                                ("State", toField $ lookup state states)
+                                ,("State name", toField state)
+                                ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
+                                ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
+                                ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
+                                                              ,title,"/",state,"/svg'/>"])
+                            ]
+                        )
+                        currentValues
+                csvf hst = CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
+            in csvf
 
 unchunkBS :: ByteString -> ByteString
 unchunkBS = BSL.fromStrict . BSL.toStrict
