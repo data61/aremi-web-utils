@@ -72,6 +72,8 @@ import           Data.Text.Lens
 -- Chart stuff
 -- import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
+import           Graphics.Rendering.Chart.Easy hiding (Default)
+
 -- import           Graphics.Rendering.Chart.Easy
 
 import           Data.Time.Calendar                        (Day)
@@ -81,7 +83,8 @@ import           Data.Time.Format                          (formatTime,
 import           Data.Time.LocalTime                       (LocalTime (..),
                                                             TimeZone,
                                                             ZonedTime (..),
-                                                            getZonedTime)
+                                                            getZonedTime,
+                                                            timeZoneName)
 import           System.Locale                             (defaultTimeLocale)
 
 import qualified System.Log.Logger                         as HSL
@@ -273,7 +276,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 allTitle = T.pack $ formatTime defaultTimeLocale (titleStr ++ " (%%) %F %X %Z") fetched
 
                 -- allChart :: Renderable ()
-                allChart = createContributionChart tz allTitle allStates
+                allChart = createContributionChart tz allStates $ do
+                                layout_title .= (T.unpack allTitle)
+                                layout_y_axis . laxis_title .= "(%)"
+                                layout_x_axis . laxis_title .= timeZoneName tz
+
 
             debugM $ "Rendering " ++ titleStr ++ " SVGs"
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 500 300
@@ -281,7 +288,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
             ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
-                        chart = createContributionChart tz fullTitle [(sname,getTS lns sname vals)]
+                        chart = createContributionChart tz [(sname,getTS lns sname vals)] $ do
+                                    layout_title .= (T.unpack fullTitle)
+                                    layout_y_axis . laxis_title .= "(%)"
+                                    layout_x_axis . laxis_title .= timeZoneName tz
+
                     (ssvg',_) <- renderableToSVGString chart 500 300
                     let !ssvg = SvgBS $ unchunkBS ssvg'
                     return (sname, ssvg)
