@@ -129,7 +129,7 @@ import           Network.Wai                               (Application,
                                                             requestHeaderHost)
 import           Network.Wai.Util
 import           Servant
-import           Servant.Docs
+-- import           Servant.Docs
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
@@ -189,10 +189,10 @@ type APVILiveSolar =
         :<|> "json" :> Get Value)
 
 
-instance ToCapture (Capture "svgstate" Text) where
-    toCapture _ = DocCapture "svgstate" $
-        "Australian State name, currently supported are: all, "
-        ++ intercalate ", " (map (T.unpack . fst) states)
+-- instance ToCapture (Capture "svgstate" Text) where
+--     toCapture _ = DocCapture "svgstate" $
+--         "Australian State name, currently supported are: all, "
+--         ++ intercalate ", " (map (T.unpack . fst) states)
 
 makeLiveSolarServer :: IO (Either String (Server APVILiveSolar))
 makeLiveSolarServer = do
@@ -350,11 +350,12 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 csv hst = Just $ CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
 
             -- Produce json values for google chart
-            let jsonData = A.toJSON $ -- (Just A.Null :
-                                    (map (Just . A.toJSON) (drop 0 cols))
-                                    : map (f cols) vals
+            let
+                -- jsonData = A.toJSON $ -- (Just A.Null :
+                --                     (map (Just . A.toJSON) (drop 0 cols))
+                --                     : map (f cols) vals
 
-                f cls obj = map (\col -> obj ^? key col) cls
+                -- f cls obj = map (\col -> obj ^? key col) cls
 
                 jsonData2 = A.toJSON $
                     ((Just "ts") : [val ^? key "ts" | val <- vals]) :

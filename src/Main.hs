@@ -15,7 +15,7 @@ import           System.Log.Logger.TH                 (deriveLoggers)
 import           GHC.Conc.Sync                        (getNumProcessors,
                                                        setNumCapabilities)
 
-import qualified System.Remote.Monitoring             as M
+-- import qualified System.Remote.Monitoring             as M
 
 import           Network.Wai                          (Middleware)
 import           Network.Wai.Handler.Warp             (run)
@@ -74,7 +74,7 @@ main = do
     -- remains responsive while producing new graphs.
     getNumProcessors >>= setNumCapabilities
 
-    M.forkServer "localhost" 8000
+    -- M.forkServer "localhost" 8000
 
     h' <- fileHandler "all.log" HSL.DEBUG
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
