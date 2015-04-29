@@ -84,7 +84,8 @@ import           Data.Time.LocalTime                       (LocalTime (..),
                                                             TimeZone,
                                                             ZonedTime (..),
                                                             getZonedTime,
-                                                            timeZoneName)
+                                                            timeZoneName,
+                                                            utcToLocalTime)
 import           System.Locale                             (defaultTimeLocale)
 
 import qualified System.Log.Logger                         as HSL
@@ -234,7 +235,10 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                                  $ "ts" : map fst states
             allContSvgs' <- async $ renderCharts (fetched, jsn) tz "contribution"
                                                  (_String . unpacked . _Show)
-                                                 $ ("ts":) . filter (\s -> s /="wa" && s /= "nt") . map fst $ states
+                                                 $ ("ts":)
+                                                    . filter (\s -> s /="wa" && s /= "nt")
+                                                    . map fst
+                                                    $ states
 
             (allPerfSvgs, perfJSON, perfCSV) <- wait allPerfSvgs'
             (allContSvgs, contJSON, contCSV) <- wait allContSvgs'
@@ -269,6 +273,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 allStates :: [(Text,[Maybe (UTCTime,Double)])]
                 allStates = map (\(name,_) -> (name, getTS lns name vals)) states
 
+                allCorrected :: [(Text,[(LocalTime,Double)])]
+                allCorrected = [(name,[(utcToLocalTime tz utct,d)
+                                      | Just (utct,d) <- series])
+                               | (name,series) <- allStates]
+
                 titleStr :: String
                 titleStr = "All states " ++ T.unpack title
 
@@ -276,7 +285,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                 allTitle = T.pack $ formatTime defaultTimeLocale (titleStr ++ " (%%) %F %X %Z") fetched
 
                 -- allChart :: Renderable ()
-                allChart = createContributionChart tz allStates $ do
+                allChart = wsChart allCorrected $ do
                                 layout_title .= (T.unpack allTitle)
                                 layout_y_axis . laxis_title .= "(%)"
                                 layout_x_axis . laxis_title .= timeZoneName tz
@@ -288,7 +297,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
             ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
-                        chart = createContributionChart tz [(sname,getTS lns sname vals)] $ do
+
+                        plotVals = [(utcToLocalTime tz utct,d)
+                                   | Just (utct,d) <- getTS lns sname vals]
+
+                        chart = wsChart [(sname,plotVals)] $ do
                                     layout_title .= (T.unpack fullTitle)
                                     layout_y_axis . laxis_title .= "(%)"
                                     layout_x_axis . laxis_title .= timeZoneName tz

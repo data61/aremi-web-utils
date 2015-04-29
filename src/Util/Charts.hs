@@ -3,11 +3,6 @@ module Util.Charts where
 import           Data.Colour.SRGB              (sRGB24read)
 import           Graphics.Rendering.Chart.Easy
 
-import           Data.Time.Clock               (UTCTime)
-import           Data.Time.LocalTime           (LocalTime (..), TimeZone,
-                                                utcToLocalTime)
-
-
 import           Data.Text                     (Text)
 import qualified Data.Text                     as T
 
@@ -28,13 +23,12 @@ colours = map (opaque . sRGB24read) [
     "#F15854"]
 
 
--- TODO: Remove the time specific stuff
-createContributionChart
-    :: TimeZone
-    -> [(Text,[Maybe (UTCTime,Double)])]
-    -> EC (Layout LocalTime Double) ()
+wsChart
+    :: (PlotValue x, PlotValue y)
+    => [(Text,[(x,y)])]
+    -> EC (Layout x y) ()
     -> Renderable ()
-createContributionChart tz vss settings = toRenderable $ do
+wsChart vss settings = toRenderable $ do
     layout_background                             .= solidFillStyle (opaque white)
     layout_foreground                             .= (opaque black)
     -- layout_left_axis_visibility . axis_show_ticks .= False
@@ -50,9 +44,7 @@ createContributionChart tz vss settings = toRenderable $ do
         plot . liftEC $ do
             colour <- takeColor
             plot_lines_title .= (T.unpack name)
-            plot_lines_values .= [ [ (utcToLocal d,v) | Just (d,v) <- vs] ]
+            plot_lines_values .= [ vs ]
             plot_lines_style . line_color .= colour
             plot_lines_style . line_width .= 3
-    where
-        utcToLocal :: UTCTime -> LocalTime
-        utcToLocal lt = utcToLocalTime tz lt
+
