@@ -75,10 +75,7 @@ import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGStrin
 -- import           Graphics.Rendering.Chart.Easy
 
 import           Data.Time.Calendar                        (Day)
-import           Data.Time.Clock                           (NominalDiffTime,
-                                                            UTCTime, addUTCTime,
-                                                            diffUTCTime,
-                                                            getCurrentTime)
+import           Data.Time.Clock                           (UTCTime, getCurrentTime)
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
 import           Data.Time.LocalTime                       (LocalTime (..),
@@ -109,7 +106,6 @@ import           Network.HTTP.Conduit                      (HttpException (Statu
                                                             withManager)
 import           Network.HTTP.Types.Status                 (Status (..))
 
-import           Control.Concurrent
 import           Control.Concurrent.Async                  (async,
                                                             mapConcurrently,
                                                             wait)
@@ -125,6 +121,7 @@ import           Servant
 import Util.Charts
 import Util.Web
 import Util.Types
+import Util.Periodic
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
@@ -329,36 +326,6 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
 unchunkBS :: ByteString -> ByteString
 unchunkBS = BSL.fromStrict . BSL.toStrict
-
-
-
---- | Run an event every n time units. Does not guarantee that it will be run
---- each occurance of n time units if the action takes longer than n time to run.
---- It will run each action at the next block of n time (it can miss deadlines).
-every :: TimeUnit t => IO a -> t -> IO (ThreadId,MVar ())
-every act t = do
-    mv <- newEmptyMVar
-
-    now <- getCurrentTime
-    let ms = toMicroseconds t
-        ps = ms * 1000000
-        d = toEnum . fromIntegral $ ps :: NominalDiffTime
-        activations = iterate (addUTCTime d) now
-
-    tid <- forkIO (run activations >> putMVar mv ())
-    return (tid, mv)
-    where
-        run :: [UTCTime] -> IO ()
-        run ts = do
-            _ <- act
-            now <- getCurrentTime
-            case dropWhile (<= now) ts of
-                (nxt:ts') ->
-                    let delay = fromEnum (diffUTCTime nxt now) `div` 1000000
-                    in threadDelay delay >> run ts'
-
-
-
 
 
 data FetchResponse a
