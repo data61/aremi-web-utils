@@ -49,8 +49,7 @@ import qualified Data.ByteString.Lazy                      as BSL
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
 
-import           Data.Text.Encoding                        (decodeUtf8',
-                                                            encodeUtf8)
+import           Data.Text.Encoding                        (encodeUtf8)
 
 
 import           Data.HashMap.Strict                       (HashMap)
@@ -99,7 +98,6 @@ import           Control.Monad.Catch                       (Handler (..),
                                                             SomeException,
                                                             catch, catches)
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Either
 
 
 import           Network.HTTP.Conduit                      (HttpException (StatusCodeException),
@@ -109,8 +107,7 @@ import           Network.HTTP.Conduit                      (HttpException (Statu
                                                             responseBody,
                                                             responseHeaders,
                                                             withManager)
-import           Network.HTTP.Types.Status                 (Status (..),
-                                                            status200)
+import           Network.HTTP.Types.Status                 (Status (..))
 
 import           Control.Concurrent
 import           Control.Concurrent.Async                  (async,
@@ -122,21 +119,16 @@ import           Control.Retry                             (fibonacciBackoff,
 import           Data.IORef                                (newIORef)
 import           Data.Time.Units                           hiding (Day)
 
-import           Network.Wai                               (Application,
-                                                            requestHeaderHost)
-import           Network.Wai.Util
 import           Servant
 -- import           Servant.Docs
 --
 import Util.Charts
+import Util.Web
+import Util.Types
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
 
-newtype SvgBS = SvgBS {unSvg :: ByteString}
-newtype CsvBS = CsvBS {unCsv :: ByteString}
-
-type ETag = S.ByteString
 
 
 data AppState = AppState {
@@ -219,37 +211,6 @@ initialiseLiveSolar = do
             return $ Right ref
         else return $ Left "Failed to initialise live solar data"
 
-
-serveCSV :: IORef AppState -> Getter AppState (Text -> Maybe CsvBS) -> Application
-serveCSV ref lns req respond = do
-        current <- readIORef ref
-        let mhost = requestHeaderHost req
-        let makeCSV = case mhost of
-                Nothing -> Nothing
-                Just hbs -> case decodeUtf8' hbs of
-                    Left _err -> Nothing
-                    Right txt -> (current ^. lns) txt
-        case makeCSV of
-            Nothing -> error "TODO: fixme"
-            Just (CsvBS bs) -> do
-                respond =<< bytestring status200 [("Content-Type", "text/csv")] bs
-
-
-
-
-serveSVG :: IORef AppState -> Getter AppState (HashMap Text SvgBS) -> Text -> Application
-serveSVG ref lns stat _req respond = do
-    current <- readIORef ref
-
-    case H.lookup stat (current ^. lns) of
-              Nothing -> error "TODO: fixme"
-              Just (SvgBS bs) -> do
-                    respond =<< bytestring status200 [("Content-Type", "image/svg+xml")] bs
-
-serveJSON :: IORef AppState -> Getter AppState Value -> EitherT (Int,String) IO Value
-serveJSON ref lns = do
-    current <- liftIO $ readIORef ref
-    return (current ^. lns)
 
 -- Takes a number of retries and the current app state ref and attempts to contact APVI for the latest
 -- data for today.
