@@ -32,7 +32,6 @@ module APVI.LiveSolar (
 
 
 import           Data.List                                 (sortBy)
-import           Data.Maybe                                (maybeToList)
 import           Data.Monoid                               ((<>))
 import           Data.Ord                                  (comparing)
 
@@ -76,8 +75,7 @@ import           Graphics.Rendering.Chart.Easy hiding (Default)
 
 -- import           Graphics.Rendering.Chart.Easy
 
-import           Data.Time.Calendar                        (Day)
-import           Data.Time.Clock                           (UTCTime, getCurrentTime)
+import           Data.Time.Clock                           (UTCTime)
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
 import           Data.Time.LocalTime                       (LocalTime (..),
@@ -95,20 +93,11 @@ import           System.Log.Logger.TH                      (deriveLoggers)
 import           Data.IORef                                (IORef, readIORef,
                                                             writeIORef)
 
-import           Control.Monad.Catch                       (Handler (..),
-                                                            SomeException,
-                                                            catch, catches)
+import           Control.Monad.Catch                       (SomeException,
+                                                            catch)
 import           Control.Monad.IO.Class
 
-
-import           Network.HTTP.Conduit                      (HttpException (StatusCodeException),
-                                                            Manager,
-                                                            Request (..),
-                                                            httpLbs, parseUrl,
-                                                            responseBody,
-                                                            responseHeaders,
-                                                            withManager)
-import           Network.HTTP.Types.Status                 (Status (..))
+import           Network.HTTP.Conduit                      (withManager)
 
 import           Control.Concurrent.Async                  (async,
                                                             mapConcurrently,
@@ -126,6 +115,7 @@ import Util.Charts
 import Util.Web
 import Util.Types
 import Util.Periodic
+import Util.Fetch
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
@@ -220,50 +210,61 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
     now <- getZonedTime
     let day = localDay . zonedTimeToLocalTime $ now
         tz = zonedTimeZone now
+        url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
 
     current <- readIORef ref
     ejsn <- withManager $ \m ->
             liftIO $ retrying (fibonacciBackoff 1000 <> limitRetries retries)
                      (\_ e -> return (isErr e))
-                     $ fetchDate m day (_latestETag current)
+                     $ fetchFromCache m url (_latestETag current) [
+                            ("Accept"          , "application/json, text/javascript, */*"),
+                            ("X-Requested-With", "XMLHttpRequest")
+                        ]
     case ejsn of
         Err err -> errorM err >> return False
         NoChange -> debugM "update not necessary" >> return True
-        NewData metag (fetched, jsn) -> do
-            allPerfSvgs' <- async $ renderCharts (fetched, jsn) tz "performance"
-                                                 _Double
-                                                 $ "ts" : map fst states
-            allContSvgs' <- async $ renderCharts (fetched, jsn) tz "contribution"
-                                                 (_String . unpacked . _Show)
-                                                 $ ("ts":)
-                                                    . filter (\s -> s /="wa" && s /= "nt")
-                                                    . map fst
-                                                    $ states
+        NewData metag fetched bs -> do
+            case A.eitherDecode' bs of
+                Left err -> errorM err >> return False
+                Right jsn -> do
+                    allPerfSvgs' <- async $
+                        renderCharts (fetched, jsn) tz "performance"
+                                     _Double
+                                     $ "ts" : map fst states
+                    allContSvgs' <- async $
+                        renderCharts (fetched, jsn) tz "contribution"
+                                     (_String . unpacked . _Show)
+                                     $ ("ts":)
+                                        . filter (\s -> s /="wa" && s /= "nt")
+                                        . map fst
+                                        $ states
 
-            (allPerfSvgs, perfJSON, perfCSV) <- wait allPerfSvgs'
-            (allContSvgs, contJSON, contCSV) <- wait allContSvgs'
+                    (allPerfSvgs, perfJSON, perfCSV) <- wait allPerfSvgs'
+                    (allContSvgs, contJSON, contCSV) <- wait allContSvgs'
 
-            let svgSize = foldl (\n (_,bs) -> n + BSL.length (unSvg bs)) 0 (allContSvgs ++ allPerfSvgs)
+                    let svgSize = foldl (\n (_,svg) -> n + BSL.length (unSvg svg))
+                                        0
+                                        (allContSvgs ++ allPerfSvgs)
 
-            debugM $ "Total SVG size: " ++ show svgSize
+                    debugM $ "Total SVG size: " ++ show svgSize
 
-            let !newState = current
-                    & contributionGraphs    .~ H.fromList allContSvgs
-                    & performanceGraphs     .~ H.fromList allPerfSvgs
-                    & performanceCSV        .~ Just perfCSV
-                    & contributionCSV       .~ Just contCSV
-                    & performanceGraphJSON  .~ perfJSON
-                    & contributionGraphJSON .~ contJSON
-                    & timeFetched           .~ Just now
-                    & latestETag            .~ (metag <|> current ^. latestETag)
+                    let !newState = current
+                            & contributionGraphs    .~ H.fromList allContSvgs
+                            & performanceGraphs     .~ H.fromList allPerfSvgs
+                            & performanceCSV        .~ Just perfCSV
+                            & contributionCSV       .~ Just contCSV
+                            & performanceGraphJSON  .~ perfJSON
+                            & contributionGraphJSON .~ contJSON
+                            & timeFetched           .~ Just now
+                            & latestETag            .~ (metag <|> current ^. latestETag)
 
-            liftIO . writeIORef ref $ newState
-            -- performMajorGC
-            return True
+                    liftIO . writeIORef ref $ newState
+                    -- performMajorGC
+                    return True
     where
         renderCharts :: (UTCTime,Value) -> TimeZone -> Text
                      -> Prism' Value Double
-                     -> [Text] -- Column name, column type for Google Charts
+                     -> [Text]
                      -> IO ([(Text,SvgBS)], Value, Text -> CsvBS)
         renderCharts (fetched,jsn) tz title lns cols = do
             let
@@ -345,53 +346,6 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
 unchunkBS :: ByteString -> ByteString
 unchunkBS = BSL.fromStrict . BSL.toStrict
-
-
-data FetchResponse a
-    = Err String
-    | NoChange
-    | NewData (Maybe ETag) a
-
-isErr :: FetchResponse a -> Bool
-isErr (Err _) = True
-isErr _       = False
-
-fetchDate :: Manager -> Day -> Maybe ETag -> IO (FetchResponse (UTCTime, Value))
-fetchDate manager day metag = do
-    let url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
-    initReq <- parseUrl url
-    let req = initReq {
-            requestHeaders = [
-                ("Accept"          , "application/json, text/javascript, */*"),
-                ("X-Requested-With", "XMLHttpRequest")
-            ]
-            ++ maybeToList ((,) "If-None-Match" <$> metag)
-        }
-    debugM $ "Fetching " ++  url
-
-    debugM $ show req
-
-    catches (do
-        ts <- getCurrentTime
-        rsp <- httpLbs req manager
-        debugM $ show (rsp {responseBody = ()})
-        case A.eitherDecode' (responseBody rsp) of
-            Left str ->
-                return $ Err str
-            Right val ->
-                return $ NewData (lookup "ETag" (responseHeaders rsp)) (ts, val)
-
-        )
-        [
-            Handler $ \e -> case e of
-                -- If we get a 306 Not Modified there's nothing more to do
-                StatusCodeException (Status {statusCode = 304}) _ _ ->
-                    return $ NoChange
-                _ ->
-                    return $ Err (show e),
-            Handler $ \e -> return $ Err (show (e :: SomeException))
-        ]
-
 
 
 getTS :: Prism' Value a -> Text -> [Value] -> [Maybe (UTCTime, a)]
