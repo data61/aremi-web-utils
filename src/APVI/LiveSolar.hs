@@ -42,7 +42,6 @@ import Data.Default (Default(..))
 
 import           Data.ByteString                           ()
 import qualified Data.ByteString                           as S
-import           Data.ByteString.Lazy                      (ByteString)
 import qualified Data.ByteString.Lazy                      as BSL
 
 import           Data.Text                                 (Text)
@@ -58,7 +57,6 @@ import           Data.Csv                                  (defaultEncodeOptions
                                                             encodeByNameWith,
                                                             toField)
 import qualified Data.Csv                                  as Csv
--- import           Data.Vector                               (Vector)
 import qualified Data.Vector                               as V
 
 import           Control.Lens                              as L
@@ -69,11 +67,8 @@ import           Data.Text.Lens
 
 
 -- Chart stuff
--- import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
 import           Graphics.Rendering.Chart.Easy hiding (Default)
-
--- import           Graphics.Rendering.Chart.Easy
 
 import           Data.Time.Clock                           (UTCTime)
 import           Data.Time.Format                          (formatTime,
@@ -343,9 +338,6 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                         currentValues
                 csvf hst = CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
             in csvf
-
-unchunkBS :: ByteString -> ByteString
-unchunkBS = BSL.fromStrict . BSL.toStrict
 
 
 getTS :: Prism' Value a -> Text -> [Value] -> [Maybe (UTCTime, a)]

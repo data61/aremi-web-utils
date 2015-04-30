@@ -62,7 +62,6 @@ fetchFromCache manager url metag hdrs = do
         rsp <- httpLbs req manager
         debugM $ show (rsp {responseBody = ()})
         return $ NewData (lookup "ETag" (responseHeaders rsp)) ts (responseBody rsp)
-
         )
         [
             Handler $ \e -> case e of
