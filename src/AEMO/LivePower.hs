@@ -23,7 +23,7 @@ import qualified Data.ByteString      as B
 import           Data.Maybe           (catMaybes)
 
 
-import           Data.IORef           (IORef, readIORef, writeIORef)
+import           Data.IORef           (IORef, readIORef, writeIORef, newIORef)
 
 import           Data.Csv
 
@@ -39,28 +39,50 @@ import           AEMO.Types
 -- import           System.Log.FastLogger
 import           Control.Monad.Logger (LogLevel (..))
 
+import Data.Default
 
 import           Util.Types
+import           Util.Web
+import           Util.Periodic
 
 type AEMOLivePower =
     "csv" :> Raw
-    :<|>
-    Capture "DUID" Text :> "svg" :> Raw
+    -- :<|>
+    -- Capture "DUID" Text :> "svg" :> Raw
 
 
-data ALPState = AS {
+
+
+data ALPState = ALPS {
     _powerStationLocs :: Maybe (Text -> CsvBS)
 }
 
-$(makeLenses ''AppState)
+$(makeLenses ''ALPState)
 
+instance Default ALPState where
+    def = ALPS {
+        _powerStationLocs = Nothing
+        }
+
+
+makeAEMOLivePowerServer :: IO (Either String (Server AEMOLivePower))
+makeAEMOLivePowerServer = do
+    ref <- newIORef def
+
+    success <- updateALPState ref
+    if success
+        then do
+            _tid <- updateALPState ref `every` (5 :: Minute)
+            return . Right $ (serveCSV ref powerStationLocs)
+        else return . Left $ "The impossible happened!"
 
 updateALPState :: IORef ALPState -> IO Bool
 updateALPState ref = do
     current <- readIORef ref
     (locs,pows,dats) <- getLocs
     let csvf = makeCsv locs pows dats
-    writeIORef ref current { _powerStationLocs = Just csvf }
+    writeIORef ref $ current
+        & powerStationLocs .~ Just csvf
     return True
 
 getLocs :: IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
@@ -144,7 +166,7 @@ makeCsv locs pows dats = let
     emptyDatum :: NamedRecord
     emptyDatum = namedRecord
         [ "Most Recent Output (MW)" .= empty
-        , "Sample Time" .= empty
+        , "Sample Time UTC" .= empty
         ]
 
     !csv = unchunkBS $
@@ -162,4 +184,4 @@ makeCsv locs pows dats = let
         $ locs
 
 
-    in \host -> CsvBS $! csv
+    in \_host -> CsvBS $! csv

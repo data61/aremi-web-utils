@@ -36,11 +36,15 @@ import           Data.Default
 
 import           APVI.LiveSolar
 
+import AEMO.LivePower
+
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
-type App = "apvi" :> APVILiveSolar
-      :<|> "static" :> Raw
+type App =
+    "apvi" :> APVILiveSolar
+    :<|> "aemo" :> AEMOLivePower
+    :<|> "static" :> Raw
 
 appProxy :: Proxy App
 appProxy = Proxy
@@ -48,11 +52,14 @@ appProxy = Proxy
 
 appServer :: EitherT String IO (Server App)
 appServer = do
+    lp <- EitherT $ makeAEMOLivePowerServer :: EitherT String IO (Server AEMOLivePower)
     ls <- EitherT $ makeLiveSolarServer :: EitherT String IO (Server APVILiveSolar)
-    return $ ls :<|> serveDirectory "static"
+    return $ ls
+        :<|> lp
+        :<|> serveDirectory "static"
     where
-        addCorsHeader :: Middleware
-        addCorsHeader app req respond = app req (respond . replaceHeader ("Access-Control-Allow-Origin","*"))
+        _addCorsHeader :: Middleware
+        _addCorsHeader app req respond = app req (respond . replaceHeader ("Access-Control-Allow-Origin","*"))
 
 
 makeMiddleware :: IO Middleware
