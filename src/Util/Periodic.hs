@@ -1,8 +1,14 @@
-module Util.Periodic where
+module Util.Periodic
+	( every
+	, module Data.Time.Units
+	) where
 
 import           Data.Time.Units    hiding (Day)
 
 import           Control.Concurrent
+
+import Control.Exception (try, SomeException)
+import Control.Monad (void)
 
 import           Data.Time.Clock    (NominalDiffTime, UTCTime, addUTCTime,
                                      diffUTCTime, getCurrentTime)
@@ -25,7 +31,7 @@ every act t = do
     where
         run :: [UTCTime] -> IO ()
         run ts = do
-            _ <- act
+            _ <- try (void act) :: IO (Either SomeException ())
             now <- getCurrentTime
             case dropWhile (<= now) ts of
                 (nxt:ts') ->
