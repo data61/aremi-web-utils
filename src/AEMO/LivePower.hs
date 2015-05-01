@@ -18,12 +18,13 @@ import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
 -- import           Data.ByteString      (ByteString)
--- import qualified Data.ByteString      as B
+import qualified Data.ByteString      as B
 
 
 import           Data.Maybe                                (catMaybes)
 
 import           Data.Monoid
+import Data.Functor
 
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
@@ -44,6 +45,7 @@ import qualified Data.Csv                                  as C
 import           Control.Exception                         (throw)
 
 import           Database.Persist
+import Database.Persist.Postgresql
 -- import Database.Persist.Class
 
 import           Servant
@@ -51,7 +53,7 @@ import           Servant
 import           AEMO.Database
 import           AEMO.Types
 -- import           System.Log.FastLogger
-import           Control.Monad.Logger                      (LogLevel (..))
+import           Control.Monad.Logger                      (LogLevel (..), runNoLoggingT)
 
 import           Data.Default
 
@@ -80,6 +82,7 @@ type AEMOLivePower =
 
 data ALPState = ALPS
     { _powerStationLocs :: Maybe (Text -> CsvBS)
+    , _alpConnPool :: Maybe ConnectionPool
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
@@ -88,45 +91,50 @@ $(makeLenses ''ALPState)
 instance Default ALPState where
     def = ALPS
         { _powerStationLocs = Nothing
+        , _alpConnPool = Nothing
         -- , _psSvgs = H.empty
         }
 
 
 makeAEMOLivePowerServer :: IO (Either String (Server AEMOLivePower))
 makeAEMOLivePowerServer = do
-    ref <- newIORef def
+    connStr <- dbConn
+    pool <- runNoLoggingT $ createPostgresqlPool connStr 1
+    ref <- newIORef def {_alpConnPool = Just pool}
 
     success <- updateALPState ref
     if success
         then do
             _tid <- updateALPState ref `every` (5 :: Minute)
             return . Right $ (serveCSV ref powerStationLocs
-                             :<|> serveSVGLive)
+                             :<|> serveSVGLive ref)
         else return . Left $ "The impossible happened!"
 
 updateALPState :: IORef ALPState -> IO Bool
 updateALPState ref = do
     current <- readIORef ref
-    (locs,pows,dats) <- getLocs
+    (locs,pows,dats) <- getLocs ref
     let csvf = makeCsv locs pows dats
     writeIORef ref $ current
         & powerStationLocs .~ Just csvf
     return True
 
 
-serveSVGLive :: Text -> Application
-serveSVGLive duid _req resp = do
-     evs <- runApp dbConn 1 LevelDebug (getPSDForToday duid)
-     case evs of
+serveSVGLive :: IORef ALPState -> Text -> Application
+serveSVGLive ref duid _req resp = do
+    Just st <- _alpConnPool <$> readIORef ref
+    evs <- runAppPool st 1 LevelDebug (getPSDForToday duid)
+    case evs of
         Left err -> error (show err)
         Right vs -> do
              chrt <- makePSDChart duid vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              resp =<< bytestring status200 [("Content-Type", "image/svg+xml")] svg'
 
-getLocs :: IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
-getLocs = do
-    r <- runApp dbConn 1 LevelDebug $ do
+getLocs :: IORef ALPState -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
+getLocs ref = do
+    Just st <- _alpConnPool <$> readIORef ref
+    r <- runAppPool st 1 LevelDebug $ do
         runDB $ do
             locs <- selectList [] []
             pows <- selectList [] []
@@ -192,6 +200,7 @@ makeCsv locs pows dats = let
         , "Unit Size (MW)"
         , "Physical Unit No."
         , "comment"
+        , "Image"
         ]
 
     replaceKey :: (Hashable k, Eq k) => k -> k -> HashMap k a -> HashMap k a
@@ -206,24 +215,32 @@ makeCsv locs pows dats = let
     emptyDatum = namedRecord
         [ "Most Recent Output (MW)" C..= emptyT
         , "Sample Time UTC" C..= emptyT
+        , "Image" C..= emptyT
         ]
 
-    !csv = unchunkBS $
+
+    addImage :: Text -> Text -> NamedRecord -> NamedRecord
+    addImage hst duid rec = H.insert "Image" (C.toField $ T.concat ["<img src='http://",hst,"/aemo/",duid,"/svg'/>"]) rec
+
+    csv hst = unchunkBS $
         encodeByName displayCols
         . catMaybes
         . map (\loc -> do
             let duid = (duidLocationDuid loc)
             ps <- H.lookup duid powsByDuid
+            let datum = case H.lookup duid latestByDuid of
+                    Nothing -> emptyDatum
+                    Just nr -> addImage hst duid nr
             return $ H.unions [toLocRec loc
                               , ps
-                              , maybe emptyDatum id (H.lookup duid latestByDuid)
+                              , datum
                               ]
             )
         . map entityVal
         $ locs
 
 
-    in \_host -> CsvBS $! csv
+    in CsvBS . csv
 
 
 -- getPSDForToday :: Text -> AppM (Maybe SvgBS)
