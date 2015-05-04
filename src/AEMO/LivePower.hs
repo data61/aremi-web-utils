@@ -129,7 +129,7 @@ serveSVGLive ref duid _req resp = do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
-    evs <- runAppPool pool 1 lev (getPSDForToday duid)
+    evs <- runAppPool pool lev (getPSDForToday duid)
     case evs of
         Left err -> error (show err)
         Right vs -> do
@@ -139,8 +139,10 @@ serveSVGLive ref duid _req resp = do
 
 getLocs :: IORef ALPState -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
 getLocs ref = do
-    Just st <- _alpConnPool <$> readIORef ref
-    r <- runAppPool st 1 LevelDebug $ do
+    st <- readIORef ref
+    let Just pool = st ^. alpConnPool
+        lev = st ^. alpMinLogLevel
+    r <- runAppPool pool lev $ do
         runDB $ do
             locs <- selectList [] []
             pows <- selectList [] []
@@ -268,6 +270,6 @@ makePSDChart duid es = do
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
         lvs = map (\(t,v) -> (utcToLocalTime tz t, v)) tvs
     return $ wsChart [(duid,lvs)] $ do
-                layout_title .= (T.unpack ("Production for " <> duid))
+                layout_title .= (T.unpack ("Last 24h of production for " <> duid))
                 layout_y_axis . laxis_title .= "MW"
                 layout_x_axis . laxis_title .= timeZoneName tz
