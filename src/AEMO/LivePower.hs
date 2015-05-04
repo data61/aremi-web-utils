@@ -83,6 +83,7 @@ type AEMOLivePower =
 data ALPState = ALPS
     { _powerStationLocs :: Maybe (Text -> CsvBS)
     , _alpConnPool :: Maybe ConnectionPool
+    , _alpMinLogLevel :: LogLevel
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
@@ -92,6 +93,7 @@ instance Default ALPState where
     def = ALPS
         { _powerStationLocs = Nothing
         , _alpConnPool = Nothing
+        , _alpMinLogLevel = LevelDebug
         -- , _psSvgs = H.empty
         }
 
@@ -122,8 +124,10 @@ updateALPState ref = do
 
 serveSVGLive :: IORef ALPState -> Text -> Application
 serveSVGLive ref duid _req resp = do
-    Just st <- _alpConnPool <$> readIORef ref
-    evs <- runAppPool st 1 LevelDebug (getPSDForToday duid)
+    st <- readIORef ref
+    let Just pool = st ^. alpConnPool
+        lev = st ^. alpMinLogLevel
+    evs <- runAppPool pool 1 lev (getPSDForToday duid)
     case evs of
         Left err -> error (show err)
         Right vs -> do
