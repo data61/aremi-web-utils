@@ -18,20 +18,21 @@ import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
 -- import           Data.ByteString      (ByteString)
-import qualified Data.ByteString      as B
+import qualified Data.ByteString                           as B
 
 
 import           Data.Maybe                                (catMaybes)
 
+import           Data.Functor
 import           Data.Monoid
-import Data.Functor
 
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
                                                             writeIORef)
 
-import           Data.Time.Clock                           (UTCTime)
-
+import           Data.Time.Clock                           (UTCTime,
+                                                            getCurrentTime)
+import           Data.Time.Lens
 import           Data.Time.LocalTime
 
 import           Control.Monad.IO.Class
@@ -45,7 +46,7 @@ import qualified Data.Csv                                  as C
 import           Control.Exception                         (throw)
 
 import           Database.Persist
-import Database.Persist.Postgresql
+import           Database.Persist.Postgresql
 -- import Database.Persist.Class
 
 import           Servant
@@ -53,7 +54,8 @@ import           Servant
 import           AEMO.Database
 import           AEMO.Types
 -- import           System.Log.FastLogger
-import           Control.Monad.Logger                      (LogLevel (..), runNoLoggingT)
+import           Control.Monad.Logger                      (LogLevel (..),
+                                                            runNoLoggingT)
 
 import           Data.Default
 
@@ -62,7 +64,7 @@ import           Util.Types
 import           Util.Web
 
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
-import           Graphics.Rendering.Chart.Easy
+import           Graphics.Rendering.Chart.Easy             hiding (days)
 import           Util.Charts
 
 import           Network.HTTP.Types.Status                 (status200)
@@ -82,8 +84,8 @@ type AEMOLivePower =
 
 data ALPState = ALPS
     { _powerStationLocs :: Maybe (Text -> CsvBS)
-    , _alpConnPool :: Maybe ConnectionPool
-    , _alpMinLogLevel :: LogLevel
+    , _alpConnPool      :: Maybe ConnectionPool
+    , _alpMinLogLevel   :: LogLevel
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
@@ -250,22 +252,18 @@ makeCsv locs pows dats = let
 -- getPSDForToday :: Text -> AppM (Maybe SvgBS)
 getPSDForToday :: Text -> AppM [Entity PowerStationDatum]
 getPSDForToday duid = do
-    now <- liftIO getZonedTime
-    let today :: ZonedTime
-        today = now {zonedTimeToLocalTime =
-                     (zonedTimeToLocalTime now) {localTimeOfDay = midnight}
-                    } -- need lenses :(
-        todayUTC :: UTCTime
-        todayUTC = zonedTimeToUTC today
+    now <- liftIO getCurrentTime
+    let yesterday = now & days -~ 1
 
     runDB $ do
         selectList [PowerStationDatumDuid ==. duid
-                   ,PowerStationDatumSampleTime >=. todayUTC]
+                   ,PowerStationDatumSampleTime >=. yesterday]
                    []
 
 makePSDChart :: Text -> [Entity PowerStationDatum] -> IO (Renderable ())
 makePSDChart duid es = do
-    tz <- liftIO getCurrentTimeZone
+    -- tz <- liftIO getCurrentTimeZone
+    let tz = utc
     let psds = map entityVal es
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
         lvs = map (\(t,v) -> (utcToLocalTime tz t, v)) tvs
