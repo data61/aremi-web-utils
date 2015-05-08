@@ -180,7 +180,9 @@ makeCsv locs pows dats = let
     latestByDuid =
         H.fromList
         . map (\psd -> (powerStationDatumDuid psd
-                       , replaceKey "MW" "Most Recent Output (MW)" $ toNamedRecord psd))
+                       , replaceKey "MW" "Most Recent Output (MW)"
+                        . replaceKey "Sample Time (AEST)" "Most Recent Output time (AEST)"
+                         $ toNamedRecord psd))
         . map entityVal
         $ dats
 
@@ -219,7 +221,7 @@ makeCsv locs pows dats = let
     emptyDatum :: NamedRecord
     emptyDatum = namedRecord
         [ "Most Recent Output (MW)" C..= emptyT
-        , "Sample Time UTC" C..= emptyT
+        , "Most Recent Output Time (AEST)" C..= emptyT
         , "Image" C..= emptyT
         ]
 
