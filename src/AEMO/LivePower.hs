@@ -50,8 +50,6 @@ import           Database.Persist.Postgresql
 
 import           Servant
 
-import           AEMO.Database
-import           AEMO.Types
 -- import           System.Log.FastLogger
 import           Control.Monad.Logger                      (LogLevel (..),
                                                             runNoLoggingT)
@@ -70,6 +68,8 @@ import           Network.HTTP.Types.Status                 (status200)
 import           Network.Wai                               (Application)
 import           Network.Wai.Util                          (bytestring)
 
+import           AEMO.Database
+import           AEMO.Types
 
 
 
@@ -185,12 +185,15 @@ makeCsv locs pows dats = let
         $ dats
 
     displayCols =
-        [ "Lat"
-        , "Lon"
+        [ "Station Name"
         , "Most Recent Output (MW)"
-        , "DUID"
+        , "Most Recent Output Time (AEST)"
+        , "Max Cap (MW)"
+        , "Reg Cap (MW)"
+        , "Max ROC/Min"
+        , "Unit Size (MW)"
+        , "Physical Unit No."
         , "Participant"
-        , "Station Name"
         , "Dispatch Type"
         , "Category"
         , "Classification"
@@ -199,14 +202,9 @@ makeCsv locs pows dats = let
         , "Technology Type - Primary"
         , "Technology Type - Descriptor"
         , "Aggregation"
-
-        , "Sample Time UTC"
-        , "Max Cap (MW)"
-        , "Reg Cap (MW)"
-        , "Max ROC/Min"
-        , "Unit Size (MW)"
-        , "Physical Unit No."
-        , "comment"
+        , "DUID"
+        , "Lat"
+        , "Lon"
         , "Image"
         ]
 
@@ -263,16 +261,10 @@ getPSDForToday duid = do
 
 makePSDChart :: Text -> [Entity PowerStationDatum] -> IO (Renderable ())
 makePSDChart duid es = do
-    -- tz <- liftIO getCurrentTimeZone
-    let tz = TimeZone
-            { timeZoneMinutes = 600
-            , timeZoneSummerOnly = False
-            , timeZoneName = "AEST"
-            }
     let psds = map entityVal es
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
-        lvs = map (\(t,v) -> (utcToLocalTime tz t, v)) tvs
+        lvs = map (\(t,v) -> (utcToLocalTime aest t, v)) tvs
     return $ wsChart [(duid,lvs)] $ do
                 layout_title .= (T.unpack ("Last 24h of production for " <> duid))
                 layout_y_axis . laxis_title .= "MW"
-                layout_x_axis . laxis_title .= timeZoneName tz
+                layout_x_axis . laxis_title .= timeZoneName aest
