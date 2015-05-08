@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -265,7 +264,11 @@ getPSDForToday duid = do
 makePSDChart :: Text -> [Entity PowerStationDatum] -> IO (Renderable ())
 makePSDChart duid es = do
     -- tz <- liftIO getCurrentTimeZone
-    let tz = utc
+    let tz = TimeZone
+            { timeZoneMinutes = 600
+            , timeZoneSummerOnly = False
+            , timeZoneName = "AEST"
+            }
     let psds = map entityVal es
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
         lvs = map (\(t,v) -> (utcToLocalTime tz t, v)) tvs
