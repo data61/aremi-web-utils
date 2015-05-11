@@ -130,11 +130,15 @@ serveSVGLive ref duid _req resp = do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
-    evs <- runAppPool pool lev (getPSDForToday duid)
-    case evs of
+    eres <- runAppPool pool lev . runDB $ do
+        psName <- fmap (powerStationStationName . entityVal)
+                  <$> selectFirst [PowerStationDuid ==. duid] []
+        evs <- getPSDForToday duid
+        return (evs, psName)
+    case eres of
         Left err -> error (show err)
-        Right vs -> do
-             chrt <- makePSDChart duid vs
+        Right (vs,psName) -> do
+             chrt <- makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              resp =<< bytestring status200 [("Content-Type", "image/svg+xml")] svg'
 
@@ -257,22 +261,24 @@ makeCsv locs pows dats = let
 
 
 -- getPSDForToday :: Text -> AppM (Maybe SvgBS)
-getPSDForToday :: Text -> AppM [Entity PowerStationDatum]
+getPSDForToday :: Text -> DBMonad [Entity PowerStationDatum]
 getPSDForToday duid = do
     now <- liftIO getCurrentTime
     let yesterday = now & days -~ 1
 
-    runDB $ do
-        selectList [PowerStationDatumDuid ==. duid
-                   ,PowerStationDatumSampleTime >=. yesterday]
-                   []
+    selectList [PowerStationDatumDuid ==. duid
+               ,PowerStationDatumSampleTime >=. yesterday]
+               []
 
-makePSDChart :: Text -> [Entity PowerStationDatum] -> IO (Renderable ())
-makePSDChart duid es = do
+makePSDChart :: Text -> Maybe Text -> [Entity PowerStationDatum] -> IO (Renderable ())
+makePSDChart duid mpsName es = do
     let psds = map entityVal es
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
         lvs = map (\(t,v) -> (utcToLocalTime aest t, v)) tvs
     return $ wsChart [(duid,lvs)] $ do
-                layout_title .= (T.unpack ("Last 24h of production for " <> duid))
+                let title = T.unpack . T.concat $ case mpsName of
+                        Nothing -> ["Last 24h of production for ", duid]
+                        Just psName -> ["Last 24h of production for ", psName, " (", duid, ")"]
+                layout_title .= title
                 layout_y_axis . laxis_title .= "MW"
                 layout_x_axis . laxis_title .= timeZoneName aest
