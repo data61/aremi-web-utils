@@ -11,7 +11,9 @@ import           Control.Lens
 
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
---
+
+import           Network.HTTP.Base                         (urlEncode)
+
 import           Data.Hashable
 import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
@@ -226,8 +228,12 @@ makeCsv locs pows dats = let
         ]
 
 
-    addImage :: Text -> Text -> NamedRecord -> NamedRecord
-    addImage hst duid rec = H.insert "Image" (C.toField $ T.concat ["<img src='http://",hst,"/aemo/",duid,"/svg'/>"]) rec
+    addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
+    addImageTag hst duid rec =
+        let encduid = T.pack . urlEncode . T.unpack $ duid
+        in H.insert "Image"
+        (C.toField $ T.concat ["<img src='http://",hst,"/aemo/",encduid,"/svg'/>"])
+        rec
 
     csv hst = unchunkBS $
         encodeByName displayCols
@@ -237,7 +243,7 @@ makeCsv locs pows dats = let
             ps <- H.lookup duid powsByDuid
             let datum = case H.lookup duid latestByDuid of
                     Nothing -> emptyDatum
-                    Just nr -> addImage hst duid nr
+                    Just nr -> addImageTag hst duid nr
             return $ H.unions [toLocRec loc
                               , ps
                               , datum
