@@ -6,11 +6,13 @@
 
 module AEMO.LivePower where
 
--- import           Control.Applicative
+import           Control.Applicative
 import           Control.Lens
 
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
+import qualified Data.Text.Encoding as T
+
 
 import           Network.HTTP.Base                         (urlEncode)
 
@@ -67,7 +69,7 @@ import           Graphics.Rendering.Chart.Easy             hiding (days)
 import           Util.Charts
 
 import           Network.HTTP.Types.Status                 (status200)
-import           Network.Wai                               (Application)
+import           Network.Wai                               (Application, requestHeaderHost)
 import           Network.Wai.Util                          (bytestring)
 
 import           AEMO.Database
@@ -76,15 +78,15 @@ import           AEMO.Types
 
 
 type AEMOLivePower =
-    "csv" :> Raw
+    "svg" :> Capture "DUID" Text :> Raw
     :<|>
-    Capture "DUID" Text :> "svg" :> Raw
+    "csv" :> Capture "tech" Text :> Raw
 
 
 
 
 data ALPState = ALPS
-    { _powerStationLocs :: Maybe (Text -> CsvBS)
+    { _csvMap           :: HashMap Text (Text -> CsvBS)
     , _alpConnPool      :: Maybe ConnectionPool
     , _alpMinLogLevel   :: LogLevel
     -- , _psSvgs           :: HashMap Text CsvBS
@@ -94,7 +96,7 @@ $(makeLenses ''ALPState)
 
 instance Default ALPState where
     def = ALPS
-        { _powerStationLocs = Nothing
+        { _csvMap = H.empty
         , _alpConnPool = Nothing
         , _alpMinLogLevel = LevelDebug
         -- , _psSvgs = H.empty
@@ -111,22 +113,43 @@ makeAEMOLivePowerServer = do
     if success
         then do
             _tid <- updateALPState ref `every` (5 :: Minute)
-            return . Right $ (serveCSV ref powerStationLocs
-                             :<|> serveSVGLive ref)
+            return . Right $ (serveSVGLive ref
+                             :<|> serveCSVByTech ref)
         else return . Left $ "The impossible happened!"
 
 updateALPState :: IORef ALPState -> IO Bool
 updateALPState ref = do
     current <- readIORef ref
-    (locs,pows,dats) <- getLocs ref
-    let csvf = makeCsv locs pows dats
+    let trav :: Text -> [Filter PowerStation] -> IO (Text -> CsvBS)
+        trav typ filt = do
+            (locs,pows,dats) <- getLocs ref filt
+            return $ makeCsv locs pows dats
+
+    csvs <- H.traverseWithKey trav sectors :: IO (HashMap Text (Text -> CsvBS))
+
     writeIORef ref $ current
-        & powerStationLocs .~ Just csvf
+        & csvMap .~ csvs
     return True
+
+sectors :: HashMap Text [Filter PowerStation]
+sectors = H.fromList $
+    [("all"     ,[])
+    ,("wind"    ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Wind"])])
+    ,("solar"   ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Solar"])])
+    ,("hydro"   ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Hydro"])])
+    ,("fossil"  ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Fossil", "Fuel Oil"])])
+    ,("bio"     ,[PowerStationFuelSourcePrimary <-. (Just <$>
+                                                    ["Biomass"
+                                                    ,"Landfill / Biogas"
+                                                    ,"Landfill, Biogas"
+                                                    ,"Renewable/ Biomass / Waste"
+                                                    ,"Sewerage"
+                                                    ,"Renewable"])])
+    ]
 
 
 serveSVGLive :: IORef ALPState -> Text -> Application
-serveSVGLive ref duid _req resp = do
+serveSVGLive ref = \duid _req resp -> do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
@@ -142,19 +165,35 @@ serveSVGLive ref duid _req resp = do
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              resp =<< bytestring status200 [("Content-Type", "image/svg+xml")] svg'
 
-getLocs :: IORef ALPState -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
-getLocs ref = do
+
+
+
+
+serveCSVByTech :: IORef ALPState -> Text -> Application
+serveCSVByTech ref = \tech req resp -> do
+    st <- readIORef ref
+    case (st ^. csvMap . at tech) <*> (T.decodeUtf8 <$> requestHeaderHost req) of
+        Nothing -> error $ "tech " ++ show tech ++ " not found"
+        Just (CsvBS bs) ->
+            resp =<< bytestring status200 [("Content-Type", "text/csv")] bs
+
+
+
+getLocs :: IORef ALPState -> [Filter PowerStation] -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
+getLocs ref filts = do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
     r <- runAppPool pool lev $ do
         runDB $ do
             locs <- selectList [] []
-            pows <- selectList [] []
+            pows <- selectList filts []
             mrecent <- selectFirst [] [Desc PowerStationDatumSampleTime]
             case mrecent of
                 Nothing -> error "Database has no PowerStationData"
                 Just epsd -> do
+                    -- TODO: this is fragile and doesn't return the most recent for each DUID
+                    --       only the values which have samples equal to the latest.
                     dats <- selectList [PowerStationDatumSampleTime
                                         ==. powerStationDatumSampleTime (entityVal epsd)] []
                     return (locs, pows, dats)
@@ -192,6 +231,29 @@ makeCsv locs pows dats = let
         . map entityVal
         $ dats
 
+    replaceKey :: (Hashable k, Eq k) => k -> k -> HashMap k a -> HashMap k a
+    replaceKey frm to mp = case H.lookup frm mp of
+        Nothing -> mp
+        Just v  -> H.insert to v (H.delete frm mp)
+
+    emptyT :: Text
+    emptyT = "-"
+
+    emptyDatum :: NamedRecord
+    emptyDatum = namedRecord
+        [ "Most Recent Output (MW)" C..= emptyT
+        , "Most Recent Output Time (AEST)" C..= emptyT
+        , "Image" C..= emptyT
+        ]
+
+
+    addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
+    addImageTag hst duid rec =
+        let encduid = T.pack . urlEncode . T.unpack $ duid
+        in H.insert "Image"
+        (C.toField $ T.concat ["<img src='http://",hst,"/aemo/svg/",encduid,"'/>"])
+        rec
+
     displayCols =
         [ "Station Name"
         , "Most Recent Output (MW)"
@@ -215,29 +277,6 @@ makeCsv locs pows dats = let
         , "Lon"
         , "Image"
         ]
-
-    replaceKey :: (Hashable k, Eq k) => k -> k -> HashMap k a -> HashMap k a
-    replaceKey frm to mp = case H.lookup frm mp of
-        Nothing -> mp
-        Just v  -> H.insert to v (H.delete frm mp)
-
-    emptyT :: Text
-    emptyT = "-"
-
-    emptyDatum :: NamedRecord
-    emptyDatum = namedRecord
-        [ "Most Recent Output (MW)" C..= emptyT
-        , "Most Recent Output Time (AEST)" C..= emptyT
-        , "Image" C..= emptyT
-        ]
-
-
-    addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
-    addImageTag hst duid rec =
-        let encduid = T.pack . urlEncode . T.unpack $ duid
-        in H.insert "Image"
-        (C.toField $ T.concat ["<img src='http://",hst,"/aemo/",encduid,"/svg'/>"])
-        rec
 
     csv hst = unchunkBS $
         encodeByName displayCols
