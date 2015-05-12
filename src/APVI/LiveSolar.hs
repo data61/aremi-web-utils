@@ -156,14 +156,14 @@ states = [
 
 type APVILiveSolar =
     "performance" :>
-        ("csv" :> Raw
-        :<|> Capture "svgstate" Text :> "svg" :> Raw
-        :<|> "json" :> Get Value)
+        (    "csv"                              :> Raw
+        :<|> "svg" :> Capture "svgstate" Text   :> Raw
+        :<|> "json"                             :> Get Value)
     :<|>
     "contribution" :>
-        ("csv" :> Raw
-        :<|> Capture "svgstate" Text :> "svg" :> Raw
-        :<|> "json" :> Get Value)
+        (    "csv"                              :> Raw
+        :<|> "svg" :> Capture "svgstate" Text   :> Raw
+        :<|> "json"                             :> Get Value)
 
 
 -- instance ToCapture (Capture "svgstate" Text) where
@@ -332,7 +332,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                 ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
                                 ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
                                 ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
-                                                              ,title,"/",state,"/svg'/>"])
+                                                              ,title,"/svg/",state,"'/>"])
                             ]
                         )
                         currentValues
