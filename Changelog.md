@@ -2,6 +2,7 @@ Version 0.4.0.0
 Major changes:
 - URL Changes:
     - `/aemo/csv` -> `/aemo/csv/all`
+    - `/aemo/<DUID>/svg` -> `/aemo/svg/<DUID>`
     - Added `/aemo/csv/{wind,solar,hydro,bio,fossil}`
     - `/apvi/{performance,contribution}/<state>/svg` -> `/apvi/{performance,contribution}/svg/<state>`
 
