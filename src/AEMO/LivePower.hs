@@ -139,12 +139,16 @@ sectors = H.fromList $
     ,("hydro"   ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Hydro"])])
     ,("fossil"  ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Fossil", "Fuel Oil"])])
     ,("bio"     ,[PowerStationFuelSourcePrimary <-. (Just <$>
-                                                    ["Biomass"
-                                                    ,"Landfill / Biogas"
-                                                    ,"Landfill, Biogas"
-                                                    ,"Renewable/ Biomass / Waste"
-                                                    ,"Sewerage"
-                                                    ,"Renewable"])])
+                                                        ["Biomass"
+                                                        ,"Bagasse"
+                                                        ,"Landfill / Biogas"
+                                                        ,"Landfill, Biogas"
+                                                        ,"Renewable/ Biomass / Waste"
+                                                        ,"Sewerage"
+                                                        ,"Renewable"]
+                                                    )
+                ]
+    )
     ]
 
 
