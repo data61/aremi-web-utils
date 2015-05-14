@@ -11,7 +11,7 @@ import           Control.Lens
 
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
-import qualified Data.Text.Encoding as T
+import qualified Data.Text.Encoding                        as T
 
 
 import           Network.HTTP.Base                         (urlEncode)
@@ -25,9 +25,6 @@ import qualified Data.ByteString                           as B
 
 
 import           Data.Maybe                                (catMaybes)
-
-import           Data.Functor
-import           Data.Monoid
 
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
@@ -62,14 +59,14 @@ import           Data.Default
 
 import           Util.Periodic
 import           Util.Types
-import           Util.Web
 
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
 import           Graphics.Rendering.Chart.Easy             hiding (days)
 import           Util.Charts
 
 import           Network.HTTP.Types.Status                 (status200)
-import           Network.Wai                               (Application, requestHeaderHost)
+import           Network.Wai                               (Application,
+                                                            requestHeaderHost)
 import           Network.Wai.Util                          (bytestring)
 
 import           AEMO.Database
@@ -86,9 +83,9 @@ type AEMOLivePower =
 
 
 data ALPState = ALPS
-    { _csvMap           :: HashMap Text (Text -> CsvBS)
-    , _alpConnPool      :: Maybe ConnectionPool
-    , _alpMinLogLevel   :: LogLevel
+    { _csvMap         :: HashMap Text (Text -> CsvBS)
+    , _alpConnPool    :: Maybe ConnectionPool
+    , _alpMinLogLevel :: LogLevel
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
@@ -121,7 +118,7 @@ updateALPState :: IORef ALPState -> IO Bool
 updateALPState ref = do
     current <- readIORef ref
     let trav :: Text -> [Filter PowerStation] -> IO (Text -> CsvBS)
-        trav typ filt = do
+        trav _typ filt = do
             (locs,pows,dats) <- getLocs ref filt
             return $ makeCsv locs pows dats
 
@@ -236,9 +233,9 @@ makeCsv locs pows dats = let
         $ dats
 
     replaceKey :: (Hashable k, Eq k) => k -> k -> HashMap k a -> HashMap k a
-    replaceKey frm to mp = case H.lookup frm mp of
+    replaceKey frm too mp = case H.lookup frm mp of -- too used because of Control.Lens.Getter.to
         Nothing -> mp
-        Just v  -> H.insert to v (H.delete frm mp)
+        Just v  -> H.insert too v (H.delete frm mp)
 
     emptyT :: Text
     emptyT = "-"
