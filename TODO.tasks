@@ -1,0 +1,18 @@
+General:
+ ☐ Change to using more than one connection to DB for AEMO stuff @DB
+ ☐ Decide on how to do configuration @config
+ ☐ Come up with a unified logging framework @logging
+   ☐ Look at simple-log (https://hackage.haskell.org/package/simple-log)
+   ☐ Figure out how to configure this in the config @config
+   ☐ Investigate if we can make the HTTP logging also use this framework (unlikely)
+
+
+＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿
+Archive:
+ ✔ Add name to title (DUID - Station name) @done (15-05-15 16:48) @project(General)
+ ✔ Log bug for empty numeric columns @done (15-05-15 16:48) @project(General)
+ ✔ Split into wind, solar, hydro, bio, fossil @done (15-05-15 16:47) @project(General)
+ ✔ update AREMI with new URLs @done (15-05-15 16:47) @project(General)
+
+
+ (Created with the PlainTasks package for Sublime Text)
