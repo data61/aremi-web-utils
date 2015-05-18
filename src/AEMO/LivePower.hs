@@ -72,6 +72,10 @@ import           Network.Wai.Util                          (bytestring)
 import           AEMO.Database
 import           AEMO.Types
 
+import           Data.Configurator.Types (Config)
+import qualified Data.Configurator as C
+
+
 
 
 type AEMOLivePower =
@@ -100,16 +104,18 @@ instance Default ALPState where
         }
 
 
-makeAEMOLivePowerServer :: IO (Either String (Server AEMOLivePower))
-makeAEMOLivePowerServer = do
-    connStr <- dbConn
-    pool <- runNoLoggingT $ createPostgresqlPool connStr 1
+makeAEMOLivePowerServer :: Config -> IO (Either String (Server AEMOLivePower))
+makeAEMOLivePowerServer conf = do
+    connStr <- C.require conf "db-conn-string"
+    conns <- C.lookupDefault 10 conf "db-connections"
+    pool <- runNoLoggingT $ createPostgresqlPool connStr conns
     ref <- newIORef def {_alpConnPool = Just pool}
 
     success <- updateALPState ref
     if success
         then do
-            _tid <- updateALPState ref `every` (5 :: Minute)
+            mins <- C.lookupDefault 5 conf "update-frequency"
+            _tid <- updateALPState ref `every` (fromInteger mins :: Minute)
             return . Right $ (serveSVGLive ref
                              :<|> serveCSVByTech ref)
         else return . Left $ "The impossible happened!"

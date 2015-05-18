@@ -106,6 +106,10 @@ import           Data.Time.Units                           hiding (Day)
 import           Servant
 -- import           Servant.Docs
 --
+import           Data.Configurator.Types (Config)
+import qualified Data.Configurator as C
+
+
 import Util.Charts
 import Util.Web
 import Util.Types
@@ -171,9 +175,9 @@ type APVILiveSolar =
 --         "Australian State name, currently supported are: all, "
 --         ++ intercalate ", " (map (T.unpack . fst) states)
 
-makeLiveSolarServer :: IO (Either String (Server APVILiveSolar))
-makeLiveSolarServer = do
-    eref <- initialiseLiveSolar
+makeLiveSolarServer :: Config ->  IO (Either String (Server APVILiveSolar))
+makeLiveSolarServer conf = do
+    eref <- initialiseLiveSolar conf
     case eref of
         Left str -> return $ Left str
         Right ref -> return $ Right (
@@ -186,14 +190,17 @@ makeLiveSolarServer = do
             )
 
 
-initialiseLiveSolar :: IO (Either String (IORef AppState))
-initialiseLiveSolar = do
+initialiseLiveSolar :: Config -> IO (Either String (IORef AppState))
+initialiseLiveSolar conf = do
     ref <- newIORef def
+    mins <- C.lookupDefault 5 conf "update-frequency"
+    initialRetries <- C.lookupDefault 20 conf "initial-retries"
 
-    success <- updateRef 20 ref
+    success <- updateRef initialRetries ref
     if success
         then do
-            _tid <- updateRef 10 ref `every` (5 :: Minute)
+            retries <- C.lookupDefault 10 conf "retries"
+            _tid <- updateRef retries ref `every` (fromInteger mins :: Minute)
             return $ Right ref
         else return $ Left "Failed to initialise live solar data"
 

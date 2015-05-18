@@ -13,6 +13,7 @@ Configuration:
    ✘ YAML - never used it, needs new libraries @cancelled (Mon May 18, 2015, 10:19)
    ✘ plain text - flexible but not hierarchical @cancelled (Mon May 18, 2015, 10:19)
    ✔ 'configurator' - Looks like it could solve many problems (includin loading new configuration at runtime) https://hackage.haskell.org/package/configurator @done (Mon May 18, 2015, 10:20)
+ ☐ Use configurator to configure all the things @started(Mon May 18, 2015, 16:43)
 
 
 Logging:

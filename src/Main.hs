@@ -34,6 +34,9 @@ import           Control.Monad.Trans.Either
 
 import           Data.Default
 
+import Data.Configurator
+import Data.Configurator.Types
+
 import           APVI.LiveSolar
 
 import AEMO.LivePower
@@ -50,10 +53,10 @@ appProxy :: Proxy App
 appProxy = Proxy
 
 
-appServer :: EitherT String IO (Server App)
-appServer = do
-    lp <- EitherT $ makeAEMOLivePowerServer :: EitherT String IO (Server AEMOLivePower)
-    ls <- EitherT $ makeLiveSolarServer :: EitherT String IO (Server APVILiveSolar)
+appServer ::Config -> EitherT String IO (Server App)
+appServer conf = do
+    lp <- EitherT $ makeAEMOLivePowerServer (subconfig "aemo" conf) :: EitherT String IO (Server AEMOLivePower)
+    ls <- EitherT $ makeLiveSolarServer (subconfig "apvi" conf) :: EitherT String IO (Server APVILiveSolar)
     return $ ls
         :<|> lp
         :<|> serveDirectory "static"
@@ -81,6 +84,8 @@ main = do
     -- remains responsive while producing new graphs.
     getNumProcessors >>= setNumCapabilities
 
+    (config,_tid) <- autoReload (autoConfig {onError = print}) ["service.conf"]
+
     -- M.forkServer "localhost" 8000
 
     h' <- fileHandler "all.log" HSL.DEBUG
@@ -89,12 +94,13 @@ main = do
     HSL.updateGlobalLogger "APVI.LiveSolar" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
     infoM "apvi-webservice launch"
 
-    appServ <- runEitherT appServer
+    appServ <- runEitherT (appServer config)
 
     case appServ of
         Left err -> errorM err
         Right serv -> do
             mids <- makeMiddleware
-            run 3000 $ mids $ serve appProxy serv
+            port <- lookupDefault 3000 config "port"
+            run port $ mids $ serve appProxy serv
 
 
