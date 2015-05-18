@@ -26,6 +26,8 @@ import           Control.Monad.Trans.Either
 
 import           Util.Types
 
+import Servant.Server
+
 import Data.Functor ((<$>))
 
 
@@ -56,7 +58,7 @@ serveSVG ref lns stat _req respond = do
               Just (SvgBS bs) -> do
                     respond =<< bytestring status200 [("Content-Type", "image/svg+xml")] bs
 
-serveJSON :: IORef a -> Getter a Value -> EitherT (Int,String) IO Value
+serveJSON :: IORef a -> Getter a Value -> EitherT ServantErr IO Value
 serveJSON ref lns = do
     current <- liftIO $ readIORef ref
     return (current ^. lns)

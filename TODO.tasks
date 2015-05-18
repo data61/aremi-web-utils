@@ -1,12 +1,25 @@
 General:
+ ✔ Upgrade to Servant 0.4 @done (Mon May 18, 2015, 14:53)
+ ☐ Convert to using Get handlers properly
  ☐ Change to using more than one connection to DB for AEMO stuff @DB
- ☐ Decide on how to do configuration @config
+ ☐ Try to compile on GHC 7.10
+
+Database:
+  ☐ Investigate using Hasql for database access
+
+Configuration:
+ ✔ Decide on how to do configuration @done (Mon May 18, 2015, 10:27)
+   ✘ JSON - seems like the easiest way to work with libraries we already have @cancelled (Mon May 18, 2015, 10:19)
+   ✘ YAML - never used it, needs new libraries @cancelled (Mon May 18, 2015, 10:19)
+   ✘ plain text - flexible but not hierarchical @cancelled (Mon May 18, 2015, 10:19)
+   ✔ 'configurator' - Looks like it could solve many problems (includin loading new configuration at runtime) https://hackage.haskell.org/package/configurator @done (Mon May 18, 2015, 10:20)
+
+
+Logging:
  ☐ Come up with a unified logging framework @logging
    ☐ Look at simple-log (https://hackage.haskell.org/package/simple-log)
    ☐ Figure out how to configure this in the config @config
    ☐ Investigate if we can make the HTTP logging also use this framework (unlikely)
-
-
 ＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿
 Archive:
  ✔ Add name to title (DUID - Station name) @done (15-05-15 16:48) @project(General)

@@ -158,12 +158,12 @@ type APVILiveSolar =
     "performance" :>
         (    "csv"                              :> Raw
         :<|> "svg" :> Capture "svgstate" Text   :> Raw
-        :<|> "json"                             :> Get Value)
+        :<|> "json"                             :> Get '[JSON] Value)
     :<|>
     "contribution" :>
         (    "csv"                              :> Raw
         :<|> "svg" :> Capture "svgstate" Text   :> Raw
-        :<|> "json"                             :> Get Value)
+        :<|> "json"                             :> Get '[JSON] Value)
 
 
 -- instance ToCapture (Capture "svgstate" Text) where
