@@ -50,6 +50,7 @@ import           Database.Persist.Postgresql
 -- import Database.Persist.Class
 
 import           Servant
+import Control.Monad.Trans.Either
 
 -- import           System.Log.FastLogger
 import           Control.Monad.Logger                      (LogLevel (..),
@@ -79,9 +80,9 @@ import qualified Data.Configurator as C
 
 
 type AEMOLivePower =
-    "svg" :> Capture "DUID" Text :> Raw
+    "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
     :<|>
-    "csv" :> Capture "tech" Text :> Raw
+    "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
 
 
 
@@ -112,13 +113,13 @@ makeAEMOLivePowerServer conf = do
     ref <- newIORef def {_alpConnPool = Just pool}
 
     success <- updateALPState ref
-    if success
-        then do
+    if not success
+        then return . Left $ "The impossible happened!"
+        else do
             mins <- C.lookupDefault 5 conf "update-frequency"
             _tid <- updateALPState ref `every` (fromInteger mins :: Minute)
-            return . Right $ (serveSVGLive ref
-                             :<|> serveCSVByTech ref)
-        else return . Left $ "The impossible happened!"
+            return . Right $ (serveSVGLive ref :<|> serveCSVByTech ref)
+
 
 updateALPState :: IORef ALPState -> IO Bool
 updateALPState ref = do
@@ -155,8 +156,8 @@ sectors = H.fromList $
     ]
 
 
-serveSVGLive :: IORef ALPState -> Text -> Application
-serveSVGLive ref = \duid _req resp -> do
+serveSVGLive :: IORef ALPState -> Text -> EitherT ServantErr IO SvgBS
+serveSVGLive ref = \duid -> liftIO $ do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
@@ -170,19 +171,15 @@ serveSVGLive ref = \duid _req resp -> do
         Right (vs,psName) -> do
              chrt <- makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
-             resp =<< bytestring status200 [("Content-Type", "image/svg+xml")] svg'
+             return (SvgBS svg')
 
 
-
-
-
-serveCSVByTech :: IORef ALPState -> Text -> Application
-serveCSVByTech ref = \tech req resp -> do
-    st <- readIORef ref
-    case (st ^. csvMap . at tech) <*> (T.decodeUtf8 <$> requestHeaderHost req) of
+serveCSVByTech :: IORef ALPState -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
+serveCSVByTech ref = \tech mhost -> do
+    st <- liftIO $ readIORef ref
+    case (st ^. csvMap . at tech) <*> mhost of
         Nothing -> error $ "tech " ++ show tech ++ " not found"
-        Just (CsvBS bs) ->
-            resp =<< bytestring status200 [("Content-Type", "text/csv")] bs
+        Just csv -> return csv
 
 
 

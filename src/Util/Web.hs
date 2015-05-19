@@ -7,6 +7,7 @@ module Util.Web where
 import           Data.IORef                 (IORef, readIORef)
 
 import           Control.Lens
+import Control.Applicative
 
 import           Data.Text                  (Text)
 import           Data.Text.Encoding         (decodeUtf8')
@@ -32,31 +33,21 @@ import Data.Functor ((<$>))
 
 
 
-serveCSV :: IORef a -> Getter a (Maybe (Text -> CsvBS)) -> Application
-serveCSV ref lns req respond = do
-        current <- readIORef ref
-        let mhost = requestHeaderHost req
-        let makeCSV = case mhost of
-                Nothing -> Nothing
-                Just hbs -> case decodeUtf8' hbs of
-                    Left _err -> Nothing
-                    Right txt -> ($ txt) <$> (current ^. lns)
-        case makeCSV of
+serveCSV :: IORef a -> Getter a (Maybe (Text -> CsvBS)) -> Maybe Text -> EitherT ServantErr IO CsvBS
+serveCSV ref lns mhost = do
+        current <- liftIO $ readIORef ref
+        case (current ^. lns) <*> mhost of
             Nothing -> error "TODO: fixme"
-            Just (CsvBS bs) -> do
-                respond =<< bytestring status200 [("Content-Type", "text/csv")] bs
+            Just csv -> return csv
 
 
-
-
-serveSVG :: IORef a -> Getter a (HashMap Text SvgBS) -> Text -> Application
-serveSVG ref lns stat _req respond = do
-    current <- readIORef ref
+serveSVG :: IORef a -> Getter a (HashMap Text SvgBS) -> Text -> EitherT ServantErr IO SvgBS
+serveSVG ref lns stat = do
+    current <- liftIO $ readIORef ref
 
     case H.lookup stat (current ^. lns) of
               Nothing -> error "TODO: fixme"
-              Just (SvgBS bs) -> do
-                    respond =<< bytestring status200 [("Content-Type", "image/svg+xml")] bs
+              Just svg -> return svg
 
 serveJSON :: IORef a -> Getter a Value -> EitherT ServantErr IO Value
 serveJSON ref lns = do

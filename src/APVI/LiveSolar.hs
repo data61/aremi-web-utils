@@ -160,13 +160,13 @@ states = [
 
 type APVILiveSolar =
     "performance" :>
-        (    "csv"                              :> Raw
-        :<|> "svg" :> Capture "svgstate" Text   :> Raw
+        (    "csv"                              :> Header "Host" Text :> Get '[CSV] CsvBS
+        :<|> "svg" :> Capture "svgstate" Text   :> Get '[SVG] SvgBS
         :<|> "json"                             :> Get '[JSON] Value)
     :<|>
     "contribution" :>
-        (    "csv"                              :> Raw
-        :<|> "svg" :> Capture "svgstate" Text   :> Raw
+        (    "csv"                              :> Header "Host" Text :> Get '[CSV] CsvBS
+        :<|> "svg" :> Capture "svgstate" Text   :> Get '[SVG] SvgBS
         :<|> "json"                             :> Get '[JSON] Value)
 
 
