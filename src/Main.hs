@@ -34,7 +34,7 @@ import           Control.Monad.Trans.Either
 
 import           Data.Default
 
-import Data.Configurator
+import Data.Configurator as C
 import Data.Configurator.Types
 
 import           APVI.LiveSolar
@@ -65,9 +65,10 @@ appServer conf = do
         _addCorsHeader app req respond = app req (respond . replaceHeader ("Access-Control-Allow-Origin","*"))
 
 
-makeMiddleware :: IO Middleware
-makeMiddleware = do
-    h <- openFile "access.log" AppendMode
+makeMiddleware :: Config -> IO Middleware
+makeMiddleware config = do
+    accessLog <- C.lookupDefault "access.log" config "all-log"
+    h <- openFile accessLog AppendMode
     hSetBuffering h NoBuffering
     accessLogger <- mkRequestLogger (def {destination = Handle h
                                          ,outputFormat = Apache FromFallback
@@ -84,11 +85,11 @@ main = do
     -- remains responsive while producing new graphs.
     getNumProcessors >>= setNumCapabilities
 
-    (config,_tid) <- autoReload (autoConfig {onError = print}) ["service.conf"]
+    (config,_tid) <- autoReload (autoConfig {onError = print}) ["/etc/aremi/apvi-webservice.conf"]
 
     -- M.forkServer "localhost" 8000
-
-    h' <- fileHandler "all.log" HSL.DEBUG
+    allLog <- C.lookupDefault "all.log" config "all-log" :: IO FilePath
+    h' <- fileHandler allLog HSL.DEBUG
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
     HSL.updateGlobalLogger "Main" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
     HSL.updateGlobalLogger "APVI.LiveSolar" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
@@ -99,7 +100,7 @@ main = do
     case appServ of
         Left err -> errorM err
         Right serv -> do
-            mids <- makeMiddleware
+            mids <- makeMiddleware config
             port <- lookupDefault 3000 config "port"
             run port $ mids $ serve appProxy serv
 

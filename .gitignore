@@ -12,3 +12,9 @@ cabal.config
 
 # added by GitSavvy
 .vagrant/
+
+# added by GitSavvy
+*.log
+
+# added by GitSavvy
+*.svg
