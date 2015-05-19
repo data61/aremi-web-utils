@@ -38,7 +38,7 @@ import           Data.Ord                                  (comparing)
 import           Control.Applicative
 import           Control.Arrow                             (second)
 
-import Data.Default (Default(..))
+import           Data.Default                              (Default (..))
 
 import           Data.ByteString                           ()
 import qualified Data.ByteString                           as S
@@ -68,7 +68,7 @@ import           Data.Text.Lens
 
 -- Chart stuff
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
-import           Graphics.Rendering.Chart.Easy hiding (Default)
+import           Graphics.Rendering.Chart.Easy             hiding (Default)
 
 import           Data.Time.Clock                           (UTCTime)
 import           Data.Time.Format                          (formatTime,
@@ -106,15 +106,15 @@ import           Data.Time.Units                           hiding (Day)
 import           Servant
 -- import           Servant.Docs
 --
-import           Data.Configurator.Types (Config)
-import qualified Data.Configurator as C
+import qualified Data.Configurator                         as C
+import           Data.Configurator.Types                   (Config)
 
 
-import Util.Charts
-import Util.Web
-import Util.Types
-import Util.Periodic
-import Util.Fetch
+import           Util.Charts
+import           Util.Fetch
+import           Util.Periodic
+import           Util.Types
+import           Util.Web
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])

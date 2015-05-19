@@ -1,14 +1,14 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings     #-}
 
 module Util.Types where
 
-import qualified Data.ByteString      as S
-import           Data.ByteString.Lazy (ByteString)
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString          as S
+import           Data.ByteString.Lazy     (ByteString)
+import qualified Data.ByteString.Lazy     as BSL
 
-import Servant.API.ContentTypes
-import Network.HTTP.Media ((//))
+import           Network.HTTP.Media       ((//))
+import           Servant.API.ContentTypes
 
 data CSV
 data SVG

@@ -6,15 +6,10 @@ module Util.Web where
 
 import           Data.IORef                 (IORef, readIORef)
 
+import           Control.Applicative
 import           Control.Lens
-import Control.Applicative
 
 import           Data.Text                  (Text)
-import           Data.Text.Encoding         (decodeUtf8')
-
-import           Network.HTTP.Types.Status  (status200)
-import           Network.Wai                (Application, requestHeaderHost)
-import           Network.Wai.Util			(bytestring)
 
 import           Data.HashMap.Strict        (HashMap)
 import qualified Data.HashMap.Strict        as H
@@ -27,10 +22,7 @@ import           Control.Monad.Trans.Either
 
 import           Util.Types
 
-import Servant.Server
-
-import Data.Functor ((<$>))
-
+import           Servant.Server
 
 
 serveCSV :: IORef a -> Getter a (Maybe (Text -> CsvBS)) -> Maybe Text -> EitherT ServantErr IO CsvBS

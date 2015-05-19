@@ -11,7 +11,6 @@ import           Control.Lens
 
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
-import qualified Data.Text.Encoding                        as T
 
 
 import           Network.HTTP.Base                         (urlEncode)
@@ -20,18 +19,13 @@ import           Data.Hashable
 import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
--- import           Data.ByteString      (ByteString)
-import qualified Data.ByteString                           as B
-
-
 import           Data.Maybe                                (catMaybes)
 
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
                                                             writeIORef)
 
-import           Data.Time.Clock                           (UTCTime,
-                                                            getCurrentTime)
+import           Data.Time.Clock                           (getCurrentTime)
 import           Data.Time.Lens
 import           Data.Time.LocalTime
 
@@ -49,8 +43,8 @@ import           Database.Persist
 import           Database.Persist.Postgresql
 -- import Database.Persist.Class
 
+import           Control.Monad.Trans.Either
 import           Servant
-import Control.Monad.Trans.Either
 
 -- import           System.Log.FastLogger
 import           Control.Monad.Logger                      (LogLevel (..),
@@ -65,16 +59,11 @@ import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGStrin
 import           Graphics.Rendering.Chart.Easy             hiding (days)
 import           Util.Charts
 
-import           Network.HTTP.Types.Status                 (status200)
-import           Network.Wai                               (Application,
-                                                            requestHeaderHost)
-import           Network.Wai.Util                          (bytestring)
-
 import           AEMO.Database
 import           AEMO.Types
 
-import           Data.Configurator.Types (Config)
-import qualified Data.Configurator as C
+import qualified Data.Configurator                         as C
+import           Data.Configurator.Types                   (Config)
 
 
 

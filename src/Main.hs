@@ -24,7 +24,7 @@ import           Network.Wai.Middleware.RequestLogger (Destination (..),
                                                        IPAddrSource (..),
                                                        OutputFormat (..), RequestLoggerSettings (..),
                                                        mkRequestLogger)
-import           Network.Wai.Util                      (replaceHeader)
+import           Network.Wai.Util                     (replaceHeader)
 import           Servant
 import           System.IO                            (BufferMode (..),
                                                        IOMode (..),
@@ -34,12 +34,12 @@ import           Control.Monad.Trans.Either
 
 import           Data.Default
 
-import Data.Configurator as C
-import Data.Configurator.Types
+import           Data.Configurator                    as C
+import           Data.Configurator.Types
 
 import           APVI.LiveSolar
 
-import AEMO.LivePower
+import           AEMO.LivePower
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
