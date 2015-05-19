@@ -67,7 +67,7 @@ appServer conf = do
 
 makeMiddleware :: Config -> IO Middleware
 makeMiddleware config = do
-    accessLog <- C.lookupDefault "access.log" config "all-log"
+    accessLog <- C.lookupDefault "access.log" config "access-log"
     h <- openFile accessLog AppendMode
     hSetBuffering h NoBuffering
     accessLogger <- mkRequestLogger (def {destination = Handle h
