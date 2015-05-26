@@ -24,12 +24,15 @@ import           Util.Types
 
 import           Servant.Server
 
+import qualified Data.ByteString.Lazy.Char8 as LC8
+
+
 
 serveCSV :: IORef a -> Getter a (Maybe (Text -> CsvBS)) -> Maybe Text -> EitherT ServantErr IO CsvBS
 serveCSV ref lns mhost = do
         current <- liftIO $ readIORef ref
         case (current ^. lns) <*> mhost of
-            Nothing -> error "TODO: fixme"
+            Nothing -> left err404 {errBody = LC8.pack ("not found")}
             Just csv -> return csv
 
 
@@ -38,7 +41,7 @@ serveSVG ref lns stat = do
     current <- liftIO $ readIORef ref
 
     case H.lookup stat (current ^. lns) of
-              Nothing -> error "TODO: fixme"
+              Nothing -> left err404 {errBody = LC8.pack ("Cound not find SVG for " ++ show stat)}
               Just svg -> return svg
 
 serveJSON :: IORef a -> Getter a Value -> EitherT ServantErr IO Value

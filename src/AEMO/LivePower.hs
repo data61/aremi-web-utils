@@ -65,6 +65,9 @@ import           AEMO.Types
 import qualified Data.Configurator                         as C
 import           Data.Configurator.Types                   (Config)
 
+import qualified Data.ByteString.Lazy.Char8 as LC8
+
+
 
 
 
@@ -146,18 +149,18 @@ sectors = H.fromList $
 
 
 serveSVGLive :: IORef ALPState -> Text -> EitherT ServantErr IO SvgBS
-serveSVGLive ref = \duid -> liftIO $ do
-    st <- readIORef ref
+serveSVGLive ref = \duid -> do
+    st <- liftIO $ readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
-    eres <- runAppPool pool lev . runDB $ do
+    eres <- liftIO $ runAppPool pool lev . runDB $ do
         psName <- fmap (powerStationStationName . entityVal)
                   <$> selectFirst [PowerStationDuid ==. duid] []
         evs <- getPSDForToday duid
         return (evs, psName)
     case eres of
-        Left err -> error (show err)
-        Right (vs,psName) -> do
+        Left err -> left err404 {errBody = LC8.pack (show err)}
+        Right (vs,psName) -> liftIO $ do
              chrt <- makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              return (SvgBS svg')
@@ -167,7 +170,7 @@ serveCSVByTech :: IORef ALPState -> Text -> Maybe Text -> EitherT ServantErr IO 
 serveCSVByTech ref = \tech mhost -> do
     st <- liftIO $ readIORef ref
     case (st ^. csvMap . at tech) <*> mhost of
-        Nothing -> error $ "tech " ++ show tech ++ " not found"
+        Nothing -> left err404 {errBody = LC8.pack ("tech " ++ show tech ++ " not found")}
         Just csv -> return csv
 
 
