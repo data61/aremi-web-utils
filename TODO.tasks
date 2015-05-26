@@ -1,7 +1,7 @@
 General:
  ✔ Upgrade to Servant 0.4 @done (Mon May 18, 2015, 14:53)
- ☐ Convert to using Get handlers properly
- ☐ Change to using more than one connection to DB for AEMO stuff @DB
+ ✔ Convert to using Get handlers properly @done (Tue May 26, 2015, 15:55)
+ ✔ Change to using more than one connection to DB for AEMO stuff @DB @done (Tue May 26, 2015, 15:55)
  ☐ Try to compile on GHC 7.10
 
 Database:
@@ -13,7 +13,7 @@ Configuration:
    ✘ YAML - never used it, needs new libraries @cancelled (Mon May 18, 2015, 10:19)
    ✘ plain text - flexible but not hierarchical @cancelled (Mon May 18, 2015, 10:19)
    ✔ 'configurator' - Looks like it could solve many problems (includin loading new configuration at runtime) https://hackage.haskell.org/package/configurator @done (Mon May 18, 2015, 10:20)
- ☐ Use configurator to configure all the things @started(Mon May 18, 2015, 16:43)
+ ✔ Use configurator to configure all the things @started(Mon May 18, 2015, 16:43) @done (Tue May 26, 2015, 15:55) @lasted(7 days, 23:12)
 
 
 Logging:

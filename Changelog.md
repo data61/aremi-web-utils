@@ -1,3 +1,28 @@
+Version 0.5.0.0
+
+Major changes:
+- Update to Servant 0.4 - less code with more safety
+- Configuration now happens via the files in /etc/aremi (defaults available in config/)
+- Errors are handled in the appropriate way (no more `error` calls)
+
+- Other (auto): 
+   - Fix typo in CSV title key
+   - Fix config looking up all-log instead of access-log
+   - Use Servant properly - now using Get handlers not Raw
+   - Split config into files, make more decisions based on config
+   - Use configurator for configuration management
+   - Add initial configuration as example config
+   - Upgrade to Servant 0.4
+   - Add TODO list (Requires PlainTasks Sublime Text package to work nicely)
+   - Make -Wall clean, remove unnecessary imports
+   - Add Bagasse to the Bio fuel types
+   - Forgot to add one URL change
+   - Add markdown extension to Changelog
+   - Add changelog (finally)
+
+Contributors:
+ - Alex Mason
+
 Version 0.4.0.0
 Major changes:
 - URL Changes:
