@@ -158,7 +158,7 @@ states = [
     ("nt",7)
     ]
 
-type APVILiveSolar =
+type APVILiveSolar = "v2" :> (
     "performance" :>
         (    "csv"                              :> Header "Host" Text :> Get '[CSV] CsvBS
         :<|> "svg" :> Capture "svgstate" Text   :> Get '[SVG] SvgBS
@@ -168,6 +168,7 @@ type APVILiveSolar =
         (    "csv"                              :> Header "Host" Text :> Get '[CSV] CsvBS
         :<|> "svg" :> Capture "svgstate" Text   :> Get '[SVG] SvgBS
         :<|> "json"                             :> Get '[JSON] Value)
+    )
 
 
 -- instance ToCapture (Capture "svgstate" Text) where
@@ -338,7 +339,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                 ,("State name", toField state)
                                 ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
                                 ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
-                                ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/"
+                                ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/v2/"
                                                               ,title,"/svg/",state,"'/>"])
                             ]
                         )

@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 module AEMO.LivePower where
 
@@ -71,11 +72,11 @@ import qualified Data.ByteString.Lazy.Char8 as LC8
 
 
 
-type AEMOLivePower =
+type AEMOLivePower = "v2" :> (
     "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
     :<|>
     "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
-
+    )
 
 
 
@@ -97,29 +98,33 @@ instance Default ALPState where
         }
 
 
-makeAEMOLivePowerServer :: Config -> IO (Either String (Server AEMOLivePower))
-makeAEMOLivePowerServer conf = do
+makeAEMOLivePowerServer
+    :: IsElem SVGPath api
+    => Proxy api -> Config -> IO (Either String (Server AEMOLivePower))
+makeAEMOLivePowerServer api conf = do
     connStr <- C.require conf "db-conn-string"
     conns <- C.lookupDefault 10 conf "db-connections"
     pool <- runNoLoggingT $ createPostgresqlPool connStr conns
     ref <- newIORef def {_alpConnPool = Just pool}
 
-    success <- updateALPState ref
+    success <- updateALPState api ref
     if not success
         then return . Left $ "The impossible happened!"
         else do
             mins <- C.lookupDefault 5 conf "update-frequency"
-            _tid <- updateALPState ref `every` (fromInteger mins :: Minute)
+            _tid <- updateALPState api ref `every` (fromInteger mins :: Minute)
             return . Right $ (serveSVGLive ref :<|> serveCSVByTech ref)
 
 
-updateALPState :: IORef ALPState -> IO Bool
-updateALPState ref = do
+updateALPState
+    :: IsElem SVGPath api
+    => Proxy api -> IORef ALPState -> IO Bool
+updateALPState api ref = do
     current <- readIORef ref
     let trav :: Text -> [Filter PowerStation] -> IO (Text -> CsvBS)
         trav _typ filt = do
             (locs,pows,dats) <- getLocs ref filt
-            return $ makeCsv locs pows dats
+            return $ makeCsv api locs pows dats
 
     csvs <- H.traverseWithKey trav sectors :: IO (HashMap Text (Text -> CsvBS))
 
@@ -197,11 +202,15 @@ getLocs ref filts = do
         Left ex -> throw ex
         Right ls -> return ls
 
-makeCsv :: [Entity DuidLocation]
+type SVGPath = ("aemo" :> "v2" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
+
+makeCsv :: IsElem SVGPath api
+        => Proxy api
+        -> [Entity DuidLocation]
         -> [Entity PowerStation]
         -> [Entity PowerStationDatum]
         -> (Text -> CsvBS)
-makeCsv locs pows dats = let
+makeCsv api locs pows dats = let
     toLocRec :: DuidLocation -> NamedRecord
     toLocRec dloc = namedRecord
         [ "DUID"    C..= duidLocationDuid dloc
@@ -246,8 +255,10 @@ makeCsv locs pows dats = let
     addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
     addImageTag hst duid rec =
         let encduid = T.pack . urlEncode . T.unpack $ duid
+            linkProxy = Proxy :: Proxy SVGPath
+            uri = safeLink api linkProxy encduid
         in H.insert "Image"
-        (C.toField $ T.concat ["<img src='http://",hst,"/aemo/svg/",encduid,"'/>"])
+        (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show uri,"'/>"])
         rec
 
     displayCols =

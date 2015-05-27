@@ -45,7 +45,7 @@ import           AEMO.LivePower
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
 type App =
-    "apvi" :> APVILiveSolar
+         "apvi" :> APVILiveSolar
     :<|> "aemo" :> AEMOLivePower
     :<|> "static" :> Raw
 
@@ -55,8 +55,8 @@ appProxy = Proxy
 
 appServer ::Config -> EitherT String IO (Server App)
 appServer conf = do
-    lp <- EitherT $ makeAEMOLivePowerServer (subconfig "aemo" conf) :: EitherT String IO (Server AEMOLivePower)
-    ls <- EitherT $ makeLiveSolarServer (subconfig "apvi" conf) :: EitherT String IO (Server APVILiveSolar)
+    lp <- EitherT $ makeAEMOLivePowerServer appProxy (subconfig "aemo" conf)
+    ls <- EitherT $ makeLiveSolarServer (subconfig "apvi" conf)
     return $ ls
         :<|> lp
         :<|> serveDirectory "static"
