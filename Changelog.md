@@ -1,3 +1,21 @@
+Version: 0.6.1.0
+Changes:
+- `AEMO-archiver` library became `aemo-archiver`
+
+Version 0.6.0.0
+Major changes:
+- API now includes version numbers
+
+Other (auto):
+   - Adding 'add-source' to show dependency on aemo-archiver. Making the package artifact use a better name. Don't make a package if there are uncommitted changes.
+   - Minor version increment to deal with new aemo-archiver lib name.
+   - Ignoring the target directory.
+
+  Contributors:
+   - Mats Henrikson
+   - Alex Mason
+
+
 Version 0.5.0.0
 
 Major changes:
