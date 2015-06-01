@@ -310,7 +310,7 @@ makeCsv api locs pows dats = let
 getPSDForToday :: Text -> DBMonad [Entity PowerStationDatum]
 getPSDForToday duid = do
     now <- liftIO getCurrentTime
-    let yesterday = now & days -~ 1
+    let yesterday = now & flexDT . days -~ 1
 
     selectList [PowerStationDatumDuid ==. duid
                ,PowerStationDatumSampleTime >=. yesterday]

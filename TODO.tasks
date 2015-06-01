@@ -2,6 +2,7 @@ General:
  ☐ Use Servant.Util.Links to produce links to
    ✔ AEMO @done (Wed May 27, 2015, 14:29)
    ☐ APVI @started(Wed May 27, 2015, 14:29)
+     ☐ make data type with To/FromText instances to choose between contribution and performance
  ☐ Try to compile on GHC 7.10
  ✔ Upgrade to Servant 0.4 @done (Mon May 18, 2015, 14:53)
  ✔ Convert to using Get handlers properly @done (Tue May 26, 2015, 15:55)
