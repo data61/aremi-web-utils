@@ -1,3 +1,6 @@
+Version: 0.6.2.0
+- Add a column to the AEMO CSV output which shows the percentage of current generation compared to the reg cap
+
 Version: 0.6.1.0
 Changes:
 - `AEMO-archiver` library became `aemo-archiver`
