@@ -21,4 +21,4 @@ cabal build
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
   dist/build/apvi-webservice/apvi-webservice \
-  .cabal-sandbox/share/x86_64-linux-ghc-7.8.4/Chart-diagrams-1.4/fonts
+  .cabal-sandbox/share/x86_64-linux-ghc-7.8.4/Chart-diagrams-1.5/fonts
