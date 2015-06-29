@@ -68,7 +68,8 @@ import           Data.Configurator.Types                   (Config)
 
 import qualified Data.ByteString.Lazy.Char8 as LC8
 
-
+import Text.Read (readMaybe)
+import Text.Printf
 
 
 
@@ -219,20 +220,18 @@ makeCsv api locs pows dats = let
         , "comment" C..= duidLocationComment dloc
         ]
 
-    powsByDuid :: HashMap Text NamedRecord
+    powsByDuid :: HashMap Text PowerStation
     powsByDuid =
         H.fromList
-        . map (\ps -> (powerStationDuid ps, toNamedRecord ps))
+        . map (\ps -> (powerStationDuid ps, ps))
         . map entityVal
         $ pows
 
-    latestByDuid :: HashMap Text NamedRecord
+    latestByDuid :: HashMap Text PowerStationDatum
     latestByDuid =
         H.fromList
         . map (\psd -> (powerStationDatumDuid psd
-                       , replaceKey "MW" "Most Recent Output (MW)"
-                        . replaceKey "Sample Time (AEST)" "Most Recent Output Time (AEST)"
-                         $ toNamedRecord psd))
+                       , psd))
         . map entityVal
         $ dats
 
@@ -264,6 +263,7 @@ makeCsv api locs pows dats = let
     displayCols =
         [ "Station Name"
         , "Most Recent Output (MW)"
+        , "Current % of Reg. Capacity"
         , "Most Recent Output Time (AEST)"
         , "Max Cap (MW)"
         , "Reg Cap (MW)"
@@ -291,12 +291,18 @@ makeCsv api locs pows dats = let
         . map (\loc -> do
             let duid = (duidLocationDuid loc)
             ps <- H.lookup duid powsByDuid
-            let datum = case H.lookup duid latestByDuid of
-                    Nothing -> emptyDatum
-                    Just nr -> addImageTag hst duid nr
+
+            let (datum, livePct) = case H.lookup duid latestByDuid of
+                    Nothing -> (emptyDatum, Nothing)
+                    Just nr -> (addImageTag hst duid . toNamedRecord $ nr, calculateProdPct ps nr )
             return $ H.unions [toLocRec loc
-                              , ps
-                              , datum
+                              , toNamedRecord ps
+                              , replaceKey "MW" "Most Recent Output (MW)"
+                                . replaceKey "Sample Time (AEST)" "Most Recent Output Time (AEST)"
+                                . toNamedRecord
+                                $ datum
+                              , namedRecord ["Current % of Reg. Capacity"
+                                C..= (printf "%.2f" <$> livePct :: Maybe String)]
                               ]
             )
         . map entityVal
@@ -304,6 +310,14 @@ makeCsv api locs pows dats = let
 
 
     in CsvBS . csv
+
+
+calculateProdPct :: PowerStation -> PowerStationDatum -> Maybe Double
+calculateProdPct ps psd = do
+    regcap <- powerStationRegCapMW ps
+    tot <- readMaybe . T.unpack $ regcap
+    let mw = powerStationDatumMegaWatt psd
+    return (100 * mw/tot)
 
 
 -- getPSDForToday :: Text -> AppM (Maybe SvgBS)
