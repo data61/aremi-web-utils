@@ -1,3 +1,8 @@
+Version: 0.6.2.1
+- Added percentage of Max Cap calculated value.
+- Change graph dataseries lines from 3 to 2 "pixel" thickness.
+- Chart-diagrams package version changed.
+
 Version: 0.6.2.0
 - Add a column to the AEMO CSV output which shows the percentage of current generation compared to the reg cap
 
@@ -26,7 +31,7 @@ Major changes:
 - Configuration now happens via the files in /etc/aremi (defaults available in config/)
 - Errors are handled in the appropriate way (no more `error` calls)
 
-- Other (auto): 
+- Other (auto):
    - Fix typo in CSV title key
    - Fix config looking up all-log instead of access-log
    - Use Servant properly - now using Get handlers not Raw
