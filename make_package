@@ -1,5 +1,11 @@
 #!/bin/bash
 
+OS=$(uname -s)
+if [ "Linux" != ${OS} ]; then
+    echo "You can only build this on a Linux host."
+    exit 2
+fi
+
 git diff-index --quiet HEAD
 CLEAN=$?
 if [[ ! ${CLEAN} == 0 ]]; then
