@@ -1,0 +1,17 @@
+flags: {}
+packages:
+- '.'
+- libraries/AEMO-archiver/
+extra-deps:
+- time-units-1.0.0
+- lens-datetime-0.2.1
+- servant-0.4.3.1
+- servant-server-0.4.3.1
+- wai-cors-0.2.2
+- wai-util-0.8
+- http-accept-0.2
+- hslogger-template-2.0.3
+resolver: lts-2.19
+flags:
+ wai-cors:
+  transformers-3: true
