@@ -167,7 +167,7 @@ serveSVGLive ref = \duid -> do
     case eres of
         Left err -> left err404 {errBody = LC8.pack (show err)}
         Right (vs,psName) -> liftIO $ do
-             chrt <- makePSDChart duid psName vs
+             let chrt = makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              return (SvgBS svg')
 
@@ -330,12 +330,12 @@ getPSDForToday duid = do
                ,PowerStationDatumSampleTime >=. yesterday]
                []
 
-makePSDChart :: Text -> Maybe Text -> [Entity PowerStationDatum] -> IO (Renderable ())
+makePSDChart :: Text -> Maybe Text -> [Entity PowerStationDatum] -> Renderable ()
 makePSDChart duid mpsName es = do
     let psds = map entityVal es
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
         lvs = map (\(t,v) -> (utcToLocalTime aest t, v)) tvs
-    return $ wsChart [(duid,lvs)] $ do
+    in wsChart [(duid,lvs)] $ do
                 let title = T.unpack . T.concat $ case mpsName of
                         Nothing -> ["Last 24h of production for ", duid]
                         Just psName -> ["Last 24h of production for ", psName, " (", duid, ")"]
