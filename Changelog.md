@@ -1,16 +1,22 @@
 Version 0.7.0.0
 - v3 of AEMO live generation API now supports creating PNGs instead of SVGs to reduce bandwidth and rendering time. APVI services will be converted to use PNGs in the next major version.
 
-Changes since version-0.6.2.2:
-
   Other:
+   - Remove import of renderableToSVGString in Util.Charts - Thanks --pedantic
+   - Bump version, update changelog, add missing PNG types to Util.Types
    - Add JuicyPixels dep
    - Pull out renderImage into Util.Charts
    - Implement initial rasterific rendering and update API versions
    - Make renderPSDChart pure - it wasn't using IO
    - Convert to using `stack`
+   - Use 'git status --porcelain' instead of complicated diff to check for local modifications.
+   - Ensure make_package doesn't run on anything but a Linux host.
+   - Update version number and changelog.
+   - Added percentage of Max Cap calculated value.
+   - Change graph dataseries lines from 3 to 2 "pixel" thickness.
 
   Contributors:
+   - Mats Henrikson
    - Alex Mason
 
 Version: 0.6.2.1
