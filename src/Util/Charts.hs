@@ -6,7 +6,7 @@ import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Easy
 import           Codec.Picture.Types
 import           Diagrams.Backend.Rasterific
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, defaultEnv, runBackendR)
+import           Graphics.Rendering.Chart.Backend.Diagrams (defaultEnv, runBackendR)
 import           Diagrams.Core.Compile                     (renderDia)
 import           Diagrams.TwoD.Size                        (SizeSpec2D(..))
 
