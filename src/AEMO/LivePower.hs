@@ -4,6 +4,8 @@
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module AEMO.LivePower where
 
@@ -46,18 +48,21 @@ import           Database.Persist.Postgresql
 
 import           Control.Monad.Trans.Either
 import           Servant
-
 -- import           System.Log.FastLogger
 import           Control.Monad.Logger                      (LogLevel (..),
                                                             runNoLoggingT)
-
 import           Data.Default
 
 import           Util.Periodic
 import           Util.Types
 
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, defaultEnv, runBackendR)
 import           Graphics.Rendering.Chart.Easy             hiding (days)
+import           Diagrams.Backend.Rasterific
+import           Diagrams.Core.Compile
+import           Diagrams.TwoD.Size                        (SizeSpec2D(..))
+import           Codec.Picture.Types
+import           Codec.Picture.Png                         (encodePng)
 import           Util.Charts
 
 import           AEMO.Database
@@ -66,17 +71,28 @@ import           AEMO.Types
 import qualified Data.Configurator                         as C
 import           Data.Configurator.Types                   (Config)
 
-import qualified Data.ByteString.Lazy.Char8 as LC8
+import qualified Data.ByteString.Lazy.Char8                as LC8
 
-import Text.Read (readMaybe)
-import Text.Printf
+import           Text.Read                                 (readMaybe)
+import           Text.Printf
+
+import           Data.String
 
 
 
-type AEMOLivePower = "v2" :> (
-    "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
+type AEMOLivePower =
+    "v2" :> (
+        "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
+        :<|>
+        "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
+    )
     :<|>
-    "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
+    "v3" :> (
+        "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
+        :<|>
+        "png" :> Capture "DUID" Text :> Get '[PNG] PngBS
+        :<|>
+        "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
     )
 
 
@@ -100,7 +116,7 @@ instance Default ALPState where
 
 
 makeAEMOLivePowerServer
-    :: IsElem SVGPath api
+    :: (IsElem SVGPath api, IsElem PNGPath api)
     => Proxy api -> Config -> IO (Either String (Server AEMOLivePower))
 makeAEMOLivePowerServer api conf = do
     connStr <- C.require conf "db-conn-string"
@@ -114,11 +130,13 @@ makeAEMOLivePowerServer api conf = do
         else do
             mins <- C.lookupDefault 5 conf "update-frequency"
             _tid <- updateALPState api ref `every` (fromInteger mins :: Minute)
-            return . Right $ (serveSVGLive ref :<|> serveCSVByTech ref)
+            return . Right $
+                {-v2-} (serveSVGLive ref :<|> serveCSVByTech ref)
+                {-v3-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByTech ref)
 
 
 updateALPState
-    :: IsElem SVGPath api
+    :: (IsElem SVGPath api, IsElem PNGPath api)
     => Proxy api -> IORef ALPState -> IO Bool
 updateALPState api ref = do
     current <- readIORef ref
@@ -167,10 +185,30 @@ serveSVGLive ref = \duid -> do
     case eres of
         Left err -> left err404 {errBody = LC8.pack (show err)}
         Right (vs,psName) -> liftIO $ do
+            -- D.renderDia Rasterific
+            --             (RasterificOptions (Width 250))
+            --             (undefined :: Diagram Rasterific R2)
+            --  :: Image PixelRGBA8
              let chrt = makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              return (SvgBS svg')
 
+servePNGLive :: IORef ALPState -> Text -> EitherT ServantErr IO PngBS
+servePNGLive ref = \duid -> do
+    st <- liftIO $ readIORef ref
+    let Just pool = st ^. alpConnPool
+        lev = st ^. alpMinLogLevel
+    eres <- liftIO $ runAppPool pool lev . runDB $ do
+        psName <- fmap (powerStationStationName . entityVal)
+                  <$> selectFirst [PowerStationDuid ==. duid] []
+        evs <- getPSDForToday duid
+        return (evs, psName)
+    case eres of
+        Left err -> left err404 {errBody = LC8.pack (show err)}
+        Right (vs,psName) -> liftIO $ do
+             let chrt = makePSDChart duid psName vs
+             img <- renderImage 500 300 chrt
+             return (PngBS (encodePng img))
 
 serveCSVByTech :: IORef ALPState -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
 serveCSVByTech ref = \tech mhost -> do
@@ -203,9 +241,10 @@ getLocs ref filts = do
         Left ex -> throw ex
         Right ls -> return ls
 
-type SVGPath = ("aemo" :> "v2" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
+type SVGPath = ("aemo" :> "v3" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
+type PNGPath = ("aemo" :> "v3" :> "png" :> Capture "DUID" Text :> Get '[PNG] PngBS)
 
-makeCsv :: IsElem SVGPath api
+makeCsv :: (IsElem SVGPath api, IsElem PNGPath api)
         => Proxy api
         -> [Entity DuidLocation]
         -> [Entity PowerStation]
@@ -243,22 +282,33 @@ makeCsv api locs pows dats = let
     emptyT :: Text
     emptyT = "-"
 
+    svgKey :: IsString a => a
+    svgKey = "Latest 24h generation (SVG)"
+
+    pngKey :: IsString a => a
+    pngKey = "Latest 24h generation"
+
     emptyDatum :: NamedRecord
     emptyDatum = namedRecord
         [ "Most Recent Output (MW)" C..= emptyT
         , "Most Recent Output Time (AEST)" C..= emptyT
-        , "Image" C..= emptyT
+        , svgKey C..= emptyT
+        , pngKey C..= emptyT
         ]
 
 
     addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
     addImageTag hst duid rec =
         let encduid = T.pack . urlEncode . T.unpack $ duid
-            linkProxy = Proxy :: Proxy SVGPath
-            uri = safeLink api linkProxy encduid
-        in H.insert "Image"
-        (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show uri,"'/>"])
-        rec
+            svgProxy = Proxy :: Proxy SVGPath
+            pngProxy = Proxy :: Proxy PNGPath
+            svguri = safeLink api svgProxy encduid
+            pnguri = safeLink api pngProxy encduid
+        in H.insert svgKey
+            (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show svguri,"'/>"])
+            $ H.insert pngKey
+            (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show pnguri,"'/>"])
+            rec
 
     displayCols =
         [ "Station Name"
@@ -282,7 +332,8 @@ makeCsv api locs pows dats = let
         , "DUID"
         , "Lat"
         , "Lon"
-        , "Image"
+        -- , svgKey
+        , pngKey
         ]
 
     csv hst = unchunkBS $
@@ -331,7 +382,7 @@ getPSDForToday duid = do
                []
 
 makePSDChart :: Text -> Maybe Text -> [Entity PowerStationDatum] -> Renderable ()
-makePSDChart duid mpsName es = do
+makePSDChart duid mpsName es =
     let psds = map entityVal es
         tvs = map (\psd -> (powerStationDatumSampleTime psd, powerStationDatumMegaWatt psd)) psds
         lvs = map (\(t,v) -> (utcToLocalTime aest t, v)) tvs
@@ -342,3 +393,11 @@ makePSDChart duid mpsName es = do
                 layout_title .= title
                 layout_y_axis . laxis_title .= "MW"
                 layout_x_axis . laxis_title .= timeZoneName aest
+
+
+renderImage :: Double -> Double -> Renderable () -> IO (Image PixelRGBA8)
+renderImage h w r = do
+    env <- defaultEnv bitmapAlignmentFns h w
+    let (dia,_) = runBackendR env r
+        !img = renderDia Rasterific (RasterificOptions (Dims h w)) dia
+    return img
