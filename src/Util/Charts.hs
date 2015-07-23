@@ -1,10 +1,18 @@
+{-# LANGUAGE BangPatterns #-}
+
 module Util.Charts where
 
-import           Data.Colour.SRGB              (sRGB24read)
+import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Easy
+import           Codec.Picture.Types
+import           Diagrams.Backend.Rasterific
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, defaultEnv, runBackendR)
+import           Diagrams.Core.Compile                     (renderDia)
+import           Diagrams.TwoD.Size                        (SizeSpec2D(..))
 
-import           Data.Text                     (Text)
-import qualified Data.Text                     as T
+
+import           Data.Text                                 (Text)
+import qualified Data.Text                                 as T
 
 import           Control.Monad
 
@@ -22,6 +30,14 @@ colours = map (opaque . sRGB24read) [
     "#4D4D4D",
     "#F15854"]
 
+
+
+renderImage :: Double -> Double -> Renderable () -> IO (Image PixelRGBA8)
+renderImage h w r = do
+    env <- defaultEnv bitmapAlignmentFns h w
+    let (dia,_) = runBackendR env r
+        !img = renderDia Rasterific (RasterificOptions (Dims h w)) dia
+    return img
 
 wsChart
     :: (PlotValue x, PlotValue y)

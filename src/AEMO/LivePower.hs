@@ -56,12 +56,8 @@ import           Data.Default
 import           Util.Periodic
 import           Util.Types
 
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, defaultEnv, runBackendR)
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
 import           Graphics.Rendering.Chart.Easy             hiding (days)
-import           Diagrams.Backend.Rasterific
-import           Diagrams.Core.Compile
-import           Diagrams.TwoD.Size                        (SizeSpec2D(..))
-import           Codec.Picture.Types
 import           Codec.Picture.Png                         (encodePng)
 import           Util.Charts
 
@@ -185,13 +181,10 @@ serveSVGLive ref = \duid -> do
     case eres of
         Left err -> left err404 {errBody = LC8.pack (show err)}
         Right (vs,psName) -> liftIO $ do
-            -- D.renderDia Rasterific
-            --             (RasterificOptions (Width 250))
-            --             (undefined :: Diagram Rasterific R2)
-            --  :: Image PixelRGBA8
              let chrt = makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              return (SvgBS svg')
+
 
 servePNGLive :: IORef ALPState -> Text -> EitherT ServantErr IO PngBS
 servePNGLive ref = \duid -> do
@@ -209,6 +202,7 @@ servePNGLive ref = \duid -> do
              let chrt = makePSDChart duid psName vs
              img <- renderImage 500 300 chrt
              return (PngBS (encodePng img))
+
 
 serveCSVByTech :: IORef ALPState -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
 serveCSVByTech ref = \tech mhost -> do
@@ -371,7 +365,6 @@ calculateProdPct ps psd = do
     return (100 * mw/tot)
 
 
--- getPSDForToday :: Text -> AppM (Maybe SvgBS)
 getPSDForToday :: Text -> DBMonad [Entity PowerStationDatum]
 getPSDForToday duid = do
     now <- liftIO getCurrentTime
@@ -380,6 +373,7 @@ getPSDForToday duid = do
     selectList [PowerStationDatumDuid ==. duid
                ,PowerStationDatumSampleTime >=. yesterday]
                []
+
 
 makePSDChart :: Text -> Maybe Text -> [Entity PowerStationDatum] -> Renderable ()
 makePSDChart duid mpsName es =
@@ -393,11 +387,3 @@ makePSDChart duid mpsName es =
                 layout_title .= title
                 layout_y_axis . laxis_title .= "MW"
                 layout_x_axis . laxis_title .= timeZoneName aest
-
-
-renderImage :: Double -> Double -> Renderable () -> IO (Image PixelRGBA8)
-renderImage h w r = do
-    env <- defaultEnv bitmapAlignmentFns h w
-    let (dia,_) = runBackendR env r
-        !img = renderDia Rasterific (RasterificOptions (Dims h w)) dia
-    return img
