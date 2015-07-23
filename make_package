@@ -1,8 +1,11 @@
 #!/bin/bash
 
-git diff-index --quiet HEAD
-CLEAN=$?
-if [[ ! ${CLEAN} == 0 ]]; then
+if [ "Linux" != "$(uname -s)" ]; then
+    echo "You can only build this on a Linux host."
+    exit 2
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
     echo "There are uncommitted modifications - not making a package!"
     exit 1
 fi
@@ -21,4 +24,4 @@ cabal build
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
   dist/build/apvi-webservice/apvi-webservice \
-  .cabal-sandbox/share/x86_64-linux-ghc-7.8.4/Chart-diagrams-1.4/fonts
+  .cabal-sandbox/share/x86_64-linux-ghc-7.8.4/Chart-diagrams-1.5/fonts

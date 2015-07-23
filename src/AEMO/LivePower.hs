@@ -307,8 +307,9 @@ makeCsv api locs pows dats = let
     displayCols =
         [ "Station Name"
         , "Most Recent Output (MW)"
-        , "Current % of Reg. Capacity"
         , "Most Recent Output Time (AEST)"
+        , "Most Recent % of Max Cap"
+        , "Most Recent % of Reg Cap"
         , "Max Cap (MW)"
         , "Reg Cap (MW)"
         , "Max ROC/Min"
@@ -337,30 +338,33 @@ makeCsv api locs pows dats = let
             let duid = (duidLocationDuid loc)
             ps <- H.lookup duid powsByDuid
 
-            let (datum, livePct) = case H.lookup duid latestByDuid of
-                    Nothing -> (emptyDatum, Nothing)
-                    Just nr -> (addImageTag hst duid . toNamedRecord $ nr, calculateProdPct ps nr )
+            let (datum, regCapPct, maxCapPct) = case H.lookup duid latestByDuid of
+                    Nothing -> (emptyDatum, Nothing, Nothing)
+                    Just nr -> (addImageTag hst duid . toNamedRecord $ nr
+                                , calculateProdPct powerStationRegCapMW ps nr
+                                , calculateProdPct powerStationMaxCapMW ps nr )
             return $ H.unions [toLocRec loc
                               , toNamedRecord ps
                               , replaceKey "MW" "Most Recent Output (MW)"
                                 . replaceKey "Sample Time (AEST)" "Most Recent Output Time (AEST)"
                                 . toNamedRecord
                                 $ datum
-                              , namedRecord ["Current % of Reg. Capacity"
-                                C..= (printf "%.2f" <$> livePct :: Maybe String)]
+                              , namedRecord ["Most Recent % of Reg Cap"
+                                C..= (printf "%.2f" <$> regCapPct :: Maybe String)]
+                              , namedRecord ["Most Recent % of Max Cap"
+                                C..= (printf "%.2f" <$> maxCapPct :: Maybe String)]
                               ]
             )
         . map entityVal
         $ locs
 
-
     in CsvBS . csv
 
 
-calculateProdPct :: PowerStation -> PowerStationDatum -> Maybe Double
-calculateProdPct ps psd = do
-    regcap <- powerStationRegCapMW ps
-    tot <- readMaybe . T.unpack $ regcap
+calculateProdPct :: (PowerStation -> Maybe Text) -> PowerStation -> PowerStationDatum -> Maybe Double
+calculateProdPct capfun ps psd = do
+    cap <- capfun ps
+    tot <- readMaybe . T.unpack $ cap
     let mw = powerStationDatumMegaWatt psd
     return (100 * mw/tot)
 

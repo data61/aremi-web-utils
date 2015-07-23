@@ -62,5 +62,5 @@ wsChart vss settings = toRenderable $ do
             plot_lines_title .= (T.unpack name)
             plot_lines_values .= [ vs ]
             plot_lines_style . line_color .= colour
-            plot_lines_style . line_width .= 3
+            plot_lines_style . line_width .= 2
 
