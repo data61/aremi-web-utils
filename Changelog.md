@@ -1,3 +1,18 @@
+Version 0.7.0.0
+- v3 of AEMO live generation API now supports creating PNGs instead of SVGs to reduce bandwidth and rendering time. APVI services will be converted to use PNGs in the next major version.
+
+Changes since version-0.6.2.2:
+
+  Other:
+   - Add JuicyPixels dep
+   - Pull out renderImage into Util.Charts
+   - Implement initial rasterific rendering and update API versions
+   - Make renderPSDChart pure - it wasn't using IO
+   - Convert to using `stack`
+
+  Contributors:
+   - Alex Mason
+
 Version: 0.6.2.0
 - Add a column to the AEMO CSV output which shows the percentage of current generation compared to the reg cap
 
