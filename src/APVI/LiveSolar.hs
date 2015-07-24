@@ -205,6 +205,8 @@ initialiseLiveSolar conf = do
             return $ Right ref
         else return $ Left "Failed to initialise live solar data"
 
+-- type APVIPerformanceSVGPath = "aemo" :> "v2" :> "performance" :> "svg" :> Capture "state" Text
+-- type APVIContributionSVGPath = "aemo" :> "v2" :> "contribution" :> "svg" :> Capture "state" Text
 
 -- Takes a number of retries and the current app state ref and attempts to contact APVI for the latest
 -- data for today.

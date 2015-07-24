@@ -110,7 +110,10 @@ instance Default ALPState where
         -- , _psSvgs = H.empty
         }
 
-
+-- Handler initialisation function - called in Main.hs to create the `Server api`.
+-- Arguments are:
+--  * a `Proxy api` where `api` is the API for the entire app
+--  * the Config for the AEMO portion of the app
 makeAEMOLivePowerServer
     :: (IsElem SVGPath api, IsElem PNGPath api)
     => Proxy api -> Config -> IO (Either String (Server AEMOLivePower))
@@ -130,7 +133,8 @@ makeAEMOLivePowerServer api conf = do
                 {-v2-} (serveSVGLive ref :<|> serveCSVByTech ref)
                 {-v3-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByTech ref)
 
-
+-- Runs every `update-frequency` minutes (from Config passed to makeAEMOLivePowerServer)
+-- to update the CSVs returned by serveCSVByTech
 updateALPState
     :: (IsElem SVGPath api, IsElem PNGPath api)
     => Proxy api -> IORef ALPState -> IO Bool
@@ -147,6 +151,9 @@ updateALPState api ref = do
         & csvMap .~ csvs
     return True
 
+
+-- The filters needed to select the correct stations for each technology type
+-- from the database
 sectors :: HashMap Text [Filter PowerStation]
 sectors = H.fromList $
     [("all"     ,[])
@@ -167,7 +174,13 @@ sectors = H.fromList $
     )
     ]
 
+-- =============
+-- HTTP Handlers
+-- =============
 
+-- When given a reference to the app state, produces a handler which accepts
+-- a Text value which specifies which power station to to produce a graph
+-- of the last 24h of generation.
 serveSVGLive :: IORef ALPState -> Text -> EitherT ServantErr IO SvgBS
 serveSVGLive ref = \duid -> do
     st <- liftIO $ readIORef ref
@@ -185,7 +198,7 @@ serveSVGLive ref = \duid -> do
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
              return (SvgBS svg')
 
-
+-- Same as serveSVGLive but produces a PNG instead.
 servePNGLive :: IORef ALPState -> Text -> EitherT ServantErr IO PngBS
 servePNGLive ref = \duid -> do
     st <- liftIO $ readIORef ref
@@ -203,7 +216,9 @@ servePNGLive ref = \duid -> do
              img <- renderImage 500 300 chrt
              return (PngBS (encodePng img))
 
-
+-- Returns the CSV for the specified technology group. If the Host header is not
+-- present (which is an HTTP/1.1 no-no), or the group isn't known then the
+-- function will fail.
 serveCSVByTech :: IORef ALPState -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
 serveCSVByTech ref = \tech mhost -> do
     st <- liftIO $ readIORef ref
@@ -212,7 +227,8 @@ serveCSVByTech ref = \tech mhost -> do
         Just csv -> return csv
 
 
-
+-- Query the database to obtain lists of DuidLocations, PowerStations and PowerStationData
+-- based on the given list of filters to select a technology group.
 getLocs :: IORef ALPState -> [Filter PowerStation] -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
 getLocs ref filts = do
     st <- readIORef ref

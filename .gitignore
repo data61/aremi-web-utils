@@ -19,3 +19,6 @@ target
 
 # added by GitSavvy
 *.svg
+
+# added by GitSavvy
+/.stack-work/
