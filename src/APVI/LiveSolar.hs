@@ -15,8 +15,8 @@ module APVI.LiveSolar (
     APVILiveSolar,
     makeLiveSolarServer,
     --Types
-    SvgBS(..),
-    CsvBS(..),
+    SvgBS,
+    CsvBS,
     AppState(..),
     --
     updateRef,
@@ -247,7 +247,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     (allPerfSvgs, perfJSON, perfCSV) <- wait allPerfSvgs'
                     (allContSvgs, contJSON, contCSV) <- wait allContSvgs'
 
-                    let svgSize = foldl (\n (_,svg) -> n + BSL.length (unSvg svg))
+                    let svgSize = foldl (\n (_,svg) -> n + BSL.length (untag svg))
                                         0
                                         (allContSvgs ++ allPerfSvgs)
 
@@ -299,7 +299,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
             debugM $ "Rendering " ++ titleStr ++ " SVGs"
             (allsvg',_) <- liftIO $ renderableToSVGString allChart 500 300
-            let !allsvg = SvgBS $ unchunkBS allsvg'
+            let !allsvg = Tagged $ unchunkBS allsvg'
 
             ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
@@ -313,7 +313,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                     layout_x_axis . laxis_title .= timeZoneName tz
 
                     (ssvg',_) <- renderableToSVGString chart 500 300
-                    let !ssvg = SvgBS $ unchunkBS ssvg'
+                    let !ssvg = Tagged $ unchunkBS ssvg'
                     return (sname, ssvg)
             debugM $ "Done rendering " ++ titleStr ++ " SVGs"
 
@@ -346,7 +346,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                             ]
                         )
                         currentValues
-                csvf hst = CsvBS $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
+                csvf hst = Tagged $ encodeByNameWith defaultEncodeOptions csvHeader (namedRecords hst)
             in csvf
 
 

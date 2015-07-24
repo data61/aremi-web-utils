@@ -196,7 +196,7 @@ serveSVGLive ref = \duid -> do
         Right (vs,psName) -> liftIO $ do
              let chrt = makePSDChart duid psName vs
              (svg',_) <- liftIO $ renderableToSVGString chrt 500 300
-             return (SvgBS svg')
+             return (Tagged svg')
 
 -- Same as serveSVGLive but produces a PNG instead.
 servePNGLive :: IORef ALPState -> Text -> EitherT ServantErr IO PngBS
@@ -214,7 +214,7 @@ servePNGLive ref = \duid -> do
         Right (vs,psName) -> liftIO $ do
              let chrt = makePSDChart duid psName vs
              img <- renderImage 500 300 chrt
-             return (PngBS (encodePng img))
+             return (Tagged (encodePng img))
 
 -- Returns the CSV for the specified technology group. If the Host header is not
 -- present (which is an HTTP/1.1 no-no), or the group isn't known then the
@@ -374,7 +374,7 @@ makeCsv api locs pows dats = let
         . map entityVal
         $ locs
 
-    in CsvBS . csv
+    in Tagged . csv
 
 
 calculateProdPct :: (PowerStation -> Maybe Text) -> PowerStation -> PowerStationDatum -> Maybe Double

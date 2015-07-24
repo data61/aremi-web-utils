@@ -1,7 +1,20 @@
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
-module Util.Types where
+module Util.Types
+	( SvgBS
+    , CsvBS
+    , PngBS
+    , CSV
+    , SVG
+    , PNG
+    , ETag
+    , unchunkBS
+    , Tagged(..)
+    , untag
+	) where
 
 import qualified Data.ByteString          as S
 import           Data.ByteString.Lazy     (ByteString)
@@ -11,31 +24,24 @@ import           Network.HTTP.Media       ((//))
 import           Servant.API.ContentTypes
 
 
-newtype SvgBS = SvgBS {unSvg :: ByteString} deriving (Show)
-newtype CsvBS = CsvBS {unCsv :: ByteString} deriving (Show)
-newtype PngBS = PngBS {unPng :: ByteString} deriving (Show)
+
+type SvgBS = Tagged SVG ByteString
+type CsvBS = Tagged CSV ByteString
+type PngBS = Tagged PNG ByteString
 
 data CSV
 data SVG
 data PNG
 
+
 instance Accept CSV where
 	contentType _ = "text" // "csv"
-
-instance MimeRender CSV CsvBS where
-	mimeRender _ = unCsv
 
 instance Accept SVG where
 	contentType _ = "image" // "svg+xml"
 
-instance MimeRender SVG SvgBS where
-	mimeRender _ = unSvg
-
 instance Accept PNG where
 	contentType _ = "image" // "png"
-
-instance MimeRender PNG PngBS where
-	mimeRender _ = unPng
 
 
 type ETag = S.ByteString
