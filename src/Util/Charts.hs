@@ -1,21 +1,28 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP          #-}
 
 module Util.Charts where
 
+import           Codec.Picture.Png                         (encodePng)
 import           Data.Colour.SRGB                          (sRGB24read)
 import           Graphics.Rendering.Chart.Easy
+
 import           Codec.Picture.Types
 import           Diagrams.Backend.Rasterific
-import           Graphics.Rendering.Chart.Backend.Diagrams (defaultEnv, runBackendR)
 import           Diagrams.Core.Compile                     (renderDia)
-import           Diagrams.TwoD.Size                        (SizeSpec2D(..))
-
+import           Graphics.Rendering.Chart.Backend.Diagrams (DEnv, runBackendR)
+#if MIN_VERSION_diagrams_lib(1,3,0)
+import           Diagrams.TwoD.Size                        (mkSizeSpec2D)
+#else
+import           Diagrams.TwoD.Size                        (mkSizeSpec)
+#endif
 
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
 
 import           Control.Monad
 
+import           Util.Types
 
 -- From http://www.mulinblog.com/a-color-palette-optimized-for-data-visualization/
 colours :: [AlphaColour Double]
@@ -32,12 +39,27 @@ colours = map (opaque . sRGB24read) [
 
 
 
-renderImage :: Double -> Double -> Renderable () -> IO (Image PixelRGBA8)
-renderImage h w r = do
-    env <- defaultEnv bitmapAlignmentFns h w
-    let (dia,_) = runBackendR env r
-        !img = renderDia Rasterific (RasterificOptions (Dims h w)) dia
+#if MIN_VERSION_diagrams_lib(1,3,0)
+renderImage :: DEnv Double -> Double -> Double -> Renderable () -> IO (Image PixelRGBA8)
+renderImage env w h r = do
+    -- env <- # SCC "renderImage.defaultEnv" # defaultEnv bitmapAlignmentFns h w
+    let (!dia,_) = runBackendR env r
+        !img = renderDia Rasterific (RasterificOptions (mkSizeSpec2D (Just w) (Just h))) dia
     return img
+
+#else
+
+renderImage :: DEnv -> Double -> Double -> Renderable () -> IO (Image PixelRGBA8)
+renderImage env w h r = do
+    -- env <- # SCC "renderImage.defaultEnv" # defaultEnv bitmapAlignmentFns h w
+    let (!dia,_) = runBackendR env r
+        !img = renderDia Rasterific (RasterificOptions (mkSizeSpec (Just w) (Just h))) dia
+    return img
+#endif
+
+
+renderToPng :: Image PixelRGBA8 -> PngBS
+renderToPng = Tagged . unchunkBS . encodePng
 
 wsChart
     :: (PlotValue x, PlotValue y)
