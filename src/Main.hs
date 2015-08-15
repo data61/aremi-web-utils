@@ -25,6 +25,7 @@ import           Network.Wai.Middleware.RequestLogger (Destination (..),
                                                        OutputFormat (..), RequestLoggerSettings (..),
                                                        mkRequestLogger)
 import           Network.Wai.Util                     (replaceHeader)
+import           Network.Wai.Middleware.Gzip          (gzip)
 import           Servant
 import           System.IO                            (BufferMode (..),
                                                        IOMode (..),
@@ -73,7 +74,7 @@ makeMiddleware config = do
     accessLogger <- mkRequestLogger (def {destination = Handle h
                                          ,outputFormat = Apache FromFallback
                                          ,autoFlush = True})
-    return (accessLogger . simpleCors)
+    return (accessLogger . gzip def . simpleCors)
     -- return (logStdoutDev . simpleCors)
     -- return (simpleCors)
 
