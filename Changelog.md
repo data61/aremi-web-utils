@@ -1,7 +1,22 @@
 Version 0.7.0.0
 - v3 of AEMO live generation API now supports creating PNGs instead of SVGs to reduce bandwidth and rendering time. APVI services will be converted to use PNGs in the next major version.
+- Use `stack` for building
+- Now compatible with ghc 7.10 - change the symlink for stack.yaml between the two stack.lts-{2.19,3.0}.yaml files 
+- Add Gzip support because why not
 
   Other:
+  - Add stack-lts-{2.19,3.0}.yaml and make stack.yaml a symlink to 2.19
+   - Add "other-modules:", fix library versions for lts-3.0
+   - Add gzip support to wai middleware
+   - Replace SVGs with PNGs, ghc 7.10, http-conduit 2.1.6, chart-diagrams 1.3 and time 1.5 support
+   - Add DEnv part of the environment for LivePower so it's not created every time we need an image, make compatible with chart-diagrams 1.2 and 1.3, and ghc 7.10
+   - Make Util.Charts compatible with 7.10
+   - Add servePNG and make Util.Web compatible with 7.10
+   - Remove tabs, make Util.Fetch compatible with 7.10
+   - Remove tabs and add impossible [] case in Util.Periodic
+   - Move MimeRender instance for Tagged k ByteString into Util.Types
+   - Make use of Data.Tagged in `servant` and replace newtypes with `Tagged CSV ByteString` etc.
+   - Ignore .stack-work/, add comments to functions
    - Remove import of renderableToSVGString in Util.Charts - Thanks --pedantic
    - Bump version, update changelog, add missing PNG types to Util.Types
    - Add JuicyPixels dep
