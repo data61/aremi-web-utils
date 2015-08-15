@@ -1,7 +1,7 @@
 module Util.Periodic
-	( every
-	, module Data.Time.Units
-	) where
+    ( every
+    , module Data.Time.Units
+    ) where
 
 import           Data.Time.Units    hiding (Day)
 
@@ -37,3 +37,4 @@ every act t = do
                 (nxt:ts') ->
                     let delay = fromEnum (diffUTCTime nxt now) `div` 1000000
                     in threadDelay delay >> run ts'
+                [] -> error "Found the end of an infinite list!"
