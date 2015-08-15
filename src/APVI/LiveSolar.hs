@@ -8,6 +8,7 @@
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE CPP               #-}
 
 
 module APVI.LiveSolar (
@@ -15,7 +16,7 @@ module APVI.LiveSolar (
     APVILiveSolar,
     makeLiveSolarServer,
     --Types
-    SvgBS,
+    PngBS,
     CsvBS,
     AppState(..),
     --
@@ -67,19 +68,24 @@ import           Data.Text.Lens
 
 
 -- Chart stuff
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
 import           Graphics.Rendering.Chart.Easy             hiding (Default)
+import           Graphics.Rendering.Chart.Backend.Diagrams (defaultEnv, DEnv)
 
 import           Data.Time.Clock                           (UTCTime)
+#if MIN_VERSION_time(1,5,0)
+import           Data.Time.Format                          (formatTime,
+                                                            parseTimeM,defaultTimeLocale)
+#else
 import           Data.Time.Format                          (formatTime,
                                                             parseTime)
+import           System.Locale                             (defaultTimeLocale)
+#endif
 import           Data.Time.LocalTime                       (LocalTime (..),
                                                             TimeZone,
                                                             ZonedTime (..),
                                                             getZonedTime,
                                                             timeZoneName,
                                                             utcToLocalTime)
-import           System.Locale                             (defaultTimeLocale)
 
 import qualified System.Log.Logger                         as HSL
 import           System.Log.Logger.TH                      (deriveLoggers)
@@ -92,10 +98,14 @@ import           Control.Monad.Catch                       (SomeException,
                                                             catch)
 import           Control.Monad.IO.Class
 
+#if MIN_VERSION_http_conduit(2,1,6)
+import           Network.HTTP.Conduit                      (newManager, tlsManagerSettings)
+#else
 import           Network.HTTP.Conduit                      (withManager)
+#endif
 
 import           Control.Concurrent.Async                  (async,
-                                                            mapConcurrently,
+                                                            -- mapConcurrently,
                                                             wait)
 import           Control.Retry                             (fibonacciBackoff,
                                                             limitRetries,
@@ -125,11 +135,16 @@ data AppState = AppState {
       _timeFetched           :: !(Maybe ZonedTime)
     , _latestETag            :: !(Maybe ETag)
     , _contributionCSV       :: Maybe (Text -> CsvBS)
-    , _contributionGraphs    :: !(HashMap Text SvgBS)
+    , _contributionGraphs    :: !(HashMap Text PngBS)
     , _performanceCSV        :: Maybe (Text -> CsvBS)
-    , _performanceGraphs     :: !(HashMap Text SvgBS)
+    , _performanceGraphs     :: !(HashMap Text PngBS)
     , _performanceGraphJSON  :: Value
     , _contributionGraphJSON :: Value
+#if MIN_VERSION_diagrams_lib(1,3,0)
+    , _chartEnv              :: Maybe (DEnv Double)
+#else
+    , _chartEnv              :: Maybe DEnv
+#endif
 }
 
 $(makeLenses ''AppState)
@@ -144,7 +159,8 @@ instance Default AppState where
         _performanceCSV     = Nothing,
         _performanceGraphs  = H.empty,
         _performanceGraphJSON = A.Array empty,
-        _contributionGraphJSON = A.Array empty
+        _contributionGraphJSON = A.Array empty,
+        _chartEnv              = Nothing
     }
 
 states :: [(Text, Int)]
@@ -154,19 +170,19 @@ states = [
     ("qld",3),
     ("sa",4),
     ("wa",5),
-    ("tas",6),
-    ("nt",7)
+    ("tas",6)
+    -- ("nt",7)
     ]
 
-type APVILiveSolar = "v2" :> (
+type APVILiveSolar = "v3" :> (
     "performance" :>
         (    "csv"                              :> Header "Host" Text :> Get '[CSV] CsvBS
-        :<|> "svg" :> Capture "svgstate" Text   :> Get '[SVG] SvgBS
+        :<|> "png" :> Capture "pngstate" Text   :> Get '[PNG] PngBS
         :<|> "json"                             :> Get '[JSON] Value)
     :<|>
     "contribution" :>
         (    "csv"                              :> Header "Host" Text :> Get '[CSV] CsvBS
-        :<|> "svg" :> Capture "svgstate" Text   :> Get '[SVG] SvgBS
+        :<|> "png" :> Capture "pngstate" Text   :> Get '[PNG] PngBS
         :<|> "json"                             :> Get '[JSON] Value)
     )
 
@@ -183,19 +199,21 @@ makeLiveSolarServer conf = do
         Left str -> return $ Left str
         Right ref -> return $ Right (
             (serveCSV ref performanceCSV
-                :<|> serveSVG ref performanceGraphs
+                :<|> servePNG ref performanceGraphs
                 :<|> serveJSON ref performanceGraphJSON)
             :<|> (serveCSV ref contributionCSV
-                :<|> serveSVG ref contributionGraphs
+                :<|> servePNG ref contributionGraphs
                 :<|> serveJSON ref contributionGraphJSON)
             )
 
 
 initialiseLiveSolar :: Config -> IO (Either String (IORef AppState))
 initialiseLiveSolar conf = do
-    ref <- newIORef def
+    env <- {-# SCC "initialiseLiveSolar.defaultEnv" #-} defaultEnv bitmapAlignmentFns 500 300
+    ref <- newIORef def { _chartEnv = Just env}
     mins <- C.lookupDefault 5 conf "update-frequency"
     initialRetries <- C.lookupDefault 20 conf "initial-retries"
+
 
     success <- updateRef initialRetries ref
     if success
@@ -216,10 +234,14 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
     let day = localDay . zonedTimeToLocalTime $ now
         tz = zonedTimeZone now
         url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
-
     current <- readIORef ref
-    ejsn <- withManager $ \m ->
-            liftIO $ retrying (fibonacciBackoff 1000 <> limitRetries retries)
+    #if MIN_VERSION_http_conduit(2,1,6)
+    m <- newManager tlsManagerSettings
+    ejsn <- liftIO $
+    #else
+    ejsn <- withManager $ \m -> liftIO $
+    #endif
+            retrying (fibonacciBackoff 1000 <> limitRetries retries)
                      (\_ e -> return (isErr e))
                      $ fetchFromCache m url (_latestETag current) [
                             ("Accept"          , "application/json, text/javascript, */*"),
@@ -232,30 +254,32 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
             case A.eitherDecode' bs of
                 Left err -> errorM err >> return False
                 Right jsn -> do
-                    allPerfSvgs' <- async $
-                        renderCharts (fetched, jsn) tz "performance"
+                    let Just env = current ^. chartEnv
+                    allPerfPngs' <- async $
+                        renderCharts env (fetched, jsn) tz "performance"
                                      _Double
+                                     . filter (\s -> s /= "tas")
                                      $ "ts" : map fst states
-                    allContSvgs' <- async $
-                        renderCharts (fetched, jsn) tz "contribution"
+                    allContPngs' <- async $
+                        renderCharts env (fetched, jsn) tz "contribution"
                                      (_String . unpacked . _Show)
                                      $ ("ts":)
                                         . filter (\s -> s /="wa" && s /= "nt")
                                         . map fst
                                         $ states
 
-                    (allPerfSvgs, perfJSON, perfCSV) <- wait allPerfSvgs'
-                    (allContSvgs, contJSON, contCSV) <- wait allContSvgs'
+                    (allPerfPngs, perfJSON, perfCSV) <- wait allPerfPngs'
+                    (allContPngs, contJSON, contCSV) <- wait allContPngs'
 
-                    let svgSize = foldl (\n (_,svg) -> n + BSL.length (untag svg))
+                    let pngSize = foldl (\n (_,png) -> n + BSL.length (untag png))
                                         0
-                                        (allContSvgs ++ allPerfSvgs)
+                                        (allContPngs ++ allPerfPngs)
 
-                    debugM $ "Total SVG size: " ++ show svgSize
+                    debugM $ "Total PNG size: " ++ show pngSize
 
                     let !newState = current
-                            & contributionGraphs    .~ H.fromList allContSvgs
-                            & performanceGraphs     .~ H.fromList allPerfSvgs
+                            & contributionGraphs    .~ H.fromList allContPngs
+                            & performanceGraphs     .~ H.fromList allPerfPngs
                             & performanceCSV        .~ Just perfCSV
                             & contributionCSV       .~ Just contCSV
                             & performanceGraphJSON  .~ perfJSON
@@ -267,11 +291,15 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     -- performMajorGC
                     return True
     where
-        renderCharts :: (UTCTime,Value) -> TimeZone -> Text
+#if MIN_VERSION_diagrams_lib(1,3,0)
+        renderCharts :: DEnv Double -> (UTCTime,Value) -> TimeZone -> Text
+#else
+        renderCharts :: DEnv -> (UTCTime,Value) -> TimeZone -> Text
+#endif
                      -> Prism' Value Double
                      -> [Text]
-                     -> IO ([(Text,SvgBS)], Value, Text -> CsvBS)
-        renderCharts (fetched,jsn) tz title lns cols = do
+                     -> IO ([(Text,PngBS)], Value, Text -> CsvBS)
+        renderCharts env (fetched,jsn) tz title lns cols = do
             let
                 vals :: [Value]
                 vals = jsn ^.. key title . values
@@ -297,11 +325,12 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                 layout_x_axis . laxis_title .= timeZoneName tz
 
 
-            debugM $ "Rendering " ++ titleStr ++ " SVGs"
-            (allsvg',_) <- liftIO $ renderableToSVGString allChart 500 300
-            let !allsvg = Tagged $ unchunkBS allsvg'
+            debugM $ "Rendering " ++ titleStr ++ " PNGs"
+            allpngs' <- {-# SCC "renderCharts.renderImage(all)" #-} liftIO $ renderImage env 500 300 allChart
+            let !allpngs = renderToPng allpngs'
 
-            ssvgs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
+            -- spngs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
+            spngs <- liftIO $ flip mapM states $ \(sname,_) -> do
                     let fullTitle = T.toUpper sname <> " " <> title <> " (%)"
 
                         plotVals = [(utcToLocalTime tz utct,d)
@@ -312,10 +341,10 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                     layout_y_axis . laxis_title .= "(%)"
                                     layout_x_axis . laxis_title .= timeZoneName tz
 
-                    (ssvg',_) <- renderableToSVGString chart 500 300
-                    let !ssvg = Tagged $ unchunkBS ssvg'
-                    return (sname, ssvg)
-            debugM $ "Done rendering " ++ titleStr ++ " SVGs"
+                    spng' <- {-# SCC "renderCharts.renderImage(state)" #-} renderImage env 500 300 chart
+                    let !spng = renderToPng spng'
+                    return (sname, spng)
+            debugM $ "Done rendering " ++ titleStr ++ " PNGs"
 
 
 
@@ -324,7 +353,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     ((Just "ts") : [val ^? key "ts" | val <- vals]) :
                     [Just (A.toJSON col) : [ val ^? key col | val <- vals] | col <- drop 1 cols]
 
-            return $ (("all",allsvg):ssvgs, jsonData2, renderCSVs title allStates)
+            return $ (("all",allpngs):spngs, jsonData2, renderCSVs title allStates)
 
         renderCSVs :: Text -> [(Text,[Maybe (UTCTime,Double)])] -> (Text -> CsvBS)
         renderCSVs title allStates =
@@ -341,8 +370,8 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                 ,("State name", toField state)
                                 ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
                                 ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
-                                ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/v2/"
-                                                              ,title,"/svg/",state,"'/>"])
+                                ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/v3/"
+                                                              ,title,"/png/",state,"'/>"])
                             ]
                         )
                         currentValues
@@ -352,10 +381,14 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
 getTS :: Prism' Value a -> Text -> [Value] -> [Maybe (UTCTime, a)]
 getTS f state objs =
+#if MIN_VERSION_time(1,5,0)
+    let timeParser = parseTimeM True defaultTimeLocale "%FT%H:%M:%SZ"
+#else
     let timeParser = parseTime defaultTimeLocale "%FT%H:%M:%SZ"
+#endif
         timeLens   = key "ts" . _String . unpacked . to timeParser . _Just
         stateLens  = key state . f
     in sortBy (comparing (fmap fst))
-       . Prelude.map (\v -> (,) <$> v ^? timeLens <*> v ^? stateLens)
+       . Prelude.map (\v -> (\t s -> seq t $ seq s (t,s)) <$> v ^? timeLens <*> v ^? stateLens)
        $ objs
 
