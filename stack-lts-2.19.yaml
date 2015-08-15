@@ -1,1 +1,20 @@
-stack.yaml
+flags: {}
+packages:
+- '.'
+- libraries/AEMO-archiver/
+# - libraries/servant-0.4.3.1/
+extra-deps:
+- time-units-1.0.0
+- lens-datetime-0.2.1
+- servant-0.4.4
+- servant-server-0.4.4
+- wai-cors-0.2.3
+- wai-util-0.8
+- http-accept-0.2
+- hslogger-template-2.0.3
+# - JuicyPixels-3.2.5.2
+# 	# - diagrams-rasterific-0.1.0.8
+resolver: lts-2.19
+flags:
+ wai-cors:
+  transformers-3: true
