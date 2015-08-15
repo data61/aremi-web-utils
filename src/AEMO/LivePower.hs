@@ -6,10 +6,13 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE CPP #-}
 
 module AEMO.LivePower where
 
+#if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
+#endif
 import           Control.Lens
 
 import           Data.Text                                 (Text)
@@ -56,9 +59,8 @@ import           Data.Default
 import           Util.Periodic
 import           Util.Types
 
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, DEnv, defaultEnv)
 import           Graphics.Rendering.Chart.Easy             hiding (days)
-import           Codec.Picture.Png                         (encodePng)
 import           Util.Charts
 
 import           AEMO.Database
@@ -97,6 +99,11 @@ data ALPState = ALPS
     { _csvMap         :: HashMap Text (Text -> CsvBS)
     , _alpConnPool    :: Maybe ConnectionPool
     , _alpMinLogLevel :: LogLevel
+#if MIN_VERSION_diagrams_lib(1,3,0)
+    , _alpChartEnv    :: Maybe (DEnv Double)
+#else
+    , _alpChartEnv    :: Maybe DEnv
+#endif
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
@@ -107,6 +114,7 @@ instance Default ALPState where
         { _csvMap = H.empty
         , _alpConnPool = Nothing
         , _alpMinLogLevel = LevelDebug
+        , _alpChartEnv = Nothing
         -- , _psSvgs = H.empty
         }
 
@@ -121,7 +129,8 @@ makeAEMOLivePowerServer api conf = do
     connStr <- C.require conf "db-conn-string"
     conns <- C.lookupDefault 10 conf "db-connections"
     pool <- runNoLoggingT $ createPostgresqlPool connStr conns
-    ref <- newIORef def {_alpConnPool = Just pool}
+    env <- {-# SCC "makeAEMOLivePowerServer.defaultEnv" #-} defaultEnv bitmapAlignmentFns 500 300
+    ref <- newIORef def {_alpConnPool = Just pool, _alpChartEnv = Just env}
 
     success <- updateALPState api ref
     if not success
@@ -204,6 +213,7 @@ servePNGLive ref = \duid -> do
     st <- liftIO $ readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
+        Just env = st ^. alpChartEnv
     eres <- liftIO $ runAppPool pool lev . runDB $ do
         psName <- fmap (powerStationStationName . entityVal)
                   <$> selectFirst [PowerStationDuid ==. duid] []
@@ -213,8 +223,8 @@ servePNGLive ref = \duid -> do
         Left err -> left err404 {errBody = LC8.pack (show err)}
         Right (vs,psName) -> liftIO $ do
              let chrt = makePSDChart duid psName vs
-             img <- renderImage 500 300 chrt
-             return (Tagged (encodePng img))
+             img <- renderImage env 500 300 chrt
+             return (renderToPng img)
 
 -- Returns the CSV for the specified technology group. If the Host header is not
 -- present (which is an HTTP/1.1 no-no), or the group isn't known then the
