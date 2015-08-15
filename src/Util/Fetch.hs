@@ -1,12 +1,13 @@
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 
 module Util.Fetch (
-	FetchResponse(..)
-	, isErr
-	,fetchFromCache
-	) where
+    FetchResponse(..)
+    , isErr
+    ,fetchFromCache
+    ) where
 
 
 
@@ -21,7 +22,9 @@ import           Network.HTTP.Types.Status (Status (..))
 
 import           Data.Time.Clock           (UTCTime, getCurrentTime)
 
+#if !MIN_VERSION_base(4,8,0)
 import           Data.Functor              ((<$>))
+#endif
 import           Data.Maybe                (maybeToList)
 
 import qualified System.Log.Logger         as HSL
