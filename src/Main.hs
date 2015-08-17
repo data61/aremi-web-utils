@@ -86,7 +86,10 @@ main = do
     -- remains responsive while producing new graphs.
     getNumProcessors >>= setNumCapabilities
 
-    (config,_tid) <- autoReload (autoConfig {onError = print}) ["/etc/aremi/apvi-webservice.conf"]
+    (config,_tid) <- autoReload (autoConfig {onError = print})
+                        [ C.Required "/etc/aremi/apvi-webservice.conf"
+                        , C.Optional "/etc/aremi/apvi-webservice-v3.conf"
+                        ]
 
     -- M.forkServer "localhost" 8000
     allLog <- C.lookupDefault "all.log" config "all-log" :: IO FilePath
