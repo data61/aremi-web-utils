@@ -1,7 +1,19 @@
+Version 0.7.0.3
+- New optional API V3 config file (for running V2 and V3 concurrently on different ports).
+- Make make_package use Stack.
+
+  Other:
+   - Also look for a v3 config file in order to run concurrently with API v2.
+   - Change make_package to use Stack instead of Cabal.
+   - Only warn when making a package and there are local modifications.
+   - Fixing CPP macro indentation for Linux build.
+   - Point to LTS-2.19.
+   - Fix maccidental removal of lts-3.0 yaml file
+
 Version 0.7.0.0
 - v3 of AEMO live generation API now supports creating PNGs instead of SVGs to reduce bandwidth and rendering time. APVI services will be converted to use PNGs in the next major version.
 - Use `stack` for building
-- Now compatible with ghc 7.10 - change the symlink for stack.yaml between the two stack.lts-{2.19,3.0}.yaml files 
+- Now compatible with ghc 7.10 - change the symlink for stack.yaml between the two stack.lts-{2.19,3.0}.yaml files
 - Add Gzip support because why not
 
   Other:
