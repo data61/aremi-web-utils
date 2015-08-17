@@ -235,12 +235,12 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
         tz = zonedTimeZone now
         url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
     current <- readIORef ref
-    #if MIN_VERSION_http_conduit(2,1,6)
+#if MIN_VERSION_http_conduit(2,1,6)
     m <- newManager tlsManagerSettings
     ejsn <- liftIO $
-    #else
+#else
     ejsn <- withManager $ \m -> liftIO $
-    #endif
+#endif
             retrying (fibonacciBackoff 1000 <> limitRetries retries)
                      (\_ e -> return (isErr e))
                      $ fetchFromCache m url (_latestETag current) [
