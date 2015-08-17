@@ -6,8 +6,9 @@ if [ "Linux" != "$(uname -s)" ]; then
 fi
 
 if [ -n "$(git status --porcelain)" ]; then
-    echo "There are uncommitted modifications - not making a package!"
-    exit 1
+    echo
+    echo "There are uncommitted modifications - are you absolutely sure you want to make a package???"
+    echo
 fi
 
 DESCRIBE=$(git describe)
