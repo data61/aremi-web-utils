@@ -12,12 +12,14 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 DESCRIBE=$(git describe)
-INSTALL_PATH='.stack-work/install/x86_64-*/lts-2.*/7.*/bin'
+INSTALL_PATH='.stack-work/install/x86_64-*/lts-*/7.*/bin'
 
 stack clean
 stack build --optimizations
 
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
+  --absolute-names \
   -C ${INSTALL_PATH} \
-    apvi-webservice
+    apvi-webservice \
+    /home/vagrant/.stack/snapshots/x86_64-*/lts-*/7.*/share/x86_64-*-ghc-7.*/Chart-diagrams-*/fonts
