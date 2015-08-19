@@ -1,6 +1,8 @@
+Version 0.7.1.2
+- Update make_package to include the new fonts path.
+
 Version 0.7.1.1
 - Forgotten liftIO import fixed
-- Update make_package to include the new fonts path.
 
 Version 0.7.1.0
 - Font location can now be configured in the config using "font-path" key, defaults to ./fonts
