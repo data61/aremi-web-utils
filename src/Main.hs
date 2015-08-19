@@ -1,43 +1,45 @@
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
-{-# LANGUAGE BangPatterns      #-}
 {-# OPTIONS_GHC -with-rtsopts=-T #-}
 
 module Main where
 
-import           System.Log.Formatter                 (simpleLogFormatter)
-import           System.Log.Handler                   (setFormatter)
+import           System.Log.Formatter                      (simpleLogFormatter)
+import           System.Log.Handler                        (setFormatter)
 import           System.Log.Handler.Simple
-import qualified System.Log.Logger                    as HSL
-import           System.Log.Logger.TH                 (deriveLoggers)
+import qualified System.Log.Logger                         as HSL
+import           System.Log.Logger.TH                      (deriveLoggers)
 
-import           GHC.Conc.Sync                        (getNumProcessors,
-                                                       setNumCapabilities)
+import           GHC.Conc.Sync                             (getNumProcessors,
+                                                            setNumCapabilities)
 
 -- import qualified System.Remote.Monitoring             as M
 
-import           Network.Wai                          (Middleware)
-import           Network.Wai.Handler.Warp             (run)
-import           Network.Wai.Middleware.Cors          (simpleCors)
-import           Network.Wai.Middleware.RequestLogger (Destination (..),
-                                                       IPAddrSource (..),
-                                                       OutputFormat (..), RequestLoggerSettings (..),
-                                                       mkRequestLogger)
-import           Network.Wai.Util                     (replaceHeader)
-import           Network.Wai.Middleware.Gzip          (gzip)
+import           Network.Wai                               (Middleware)
+import           Network.Wai.Handler.Warp                  (run)
+import           Network.Wai.Middleware.Cors               (simpleCors)
+import           Network.Wai.Middleware.Gzip               (gzip)
+import           Network.Wai.Middleware.RequestLogger      (Destination (..),
+                                                            IPAddrSource (..),
+                                                            OutputFormat (..), RequestLoggerSettings (..),
+                                                            mkRequestLogger)
+import           Network.Wai.Util                          (replaceHeader)
 import           Servant
-import           System.IO                            (BufferMode (..),
-                                                       IOMode (..),
-                                                       hSetBuffering, openFile)
+import           System.IO                                 (BufferMode (..),
+                                                            IOMode (..),
+                                                            hSetBuffering,
+                                                            openFile)
 
-import           Control.Monad.IO.Class               (liftIO)
+
+import           Control.Monad.IO.Class                    (liftIO)
 import           Control.Monad.Trans.Either
 
 import           Data.Default
 
-import           Data.Configurator                    as C
+import           Data.Configurator                         as C
 import           Data.Configurator.Types
 
 import           APVI.LiveSolar
