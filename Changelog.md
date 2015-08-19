@@ -1,3 +1,6 @@
+Version 0.7.1.1
+- Forgotten liftIO import fixed
+
 Version 0.7.1.0
 - Font location can now be configured in the config using "font-path" key, defaults to ./fonts
 - Fonts are only loaded once at app launch
