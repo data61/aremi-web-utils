@@ -32,6 +32,7 @@ import           System.IO                            (BufferMode (..),
                                                        IOMode (..),
                                                        hSetBuffering, openFile)
 
+import           Control.Monad.IO.Class               (liftIO)
 import           Control.Monad.Trans.Either
 
 import           Data.Default
