@@ -1,3 +1,7 @@
+Version 0.7.1.0
+- Font location can now be configured in the config using "font-path" key, defaults to ./fonts
+- Fonts are only loaded once at app launch
+
 Version 0.7.0.3
 - New optional API V3 config file (for running V2 and V3 concurrently on different ports).
 - Make make_package use Stack.
