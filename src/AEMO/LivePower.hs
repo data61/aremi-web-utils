@@ -1,14 +1,16 @@
-{-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE OverloadedLists   #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TypeOperators     #-}
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP                   #-}
+{-# LANGUAGE ConstraintKinds       #-}
+{-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedLists       #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE BangPatterns          #-}
 
 module AEMO.LivePower where
+
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -59,9 +61,10 @@ import           Data.Default
 import           Util.Periodic
 import           Util.Types
 
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, DEnv, defaultEnv)
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, DEnv ,createEnv, defaultEnv, DFont)
 import           Graphics.Rendering.Chart.Easy             hiding (days)
 import           Util.Charts
+
 
 import           AEMO.Database
 import           AEMO.Types
@@ -99,11 +102,7 @@ data ALPState = ALPS
     { _csvMap         :: HashMap Text (Text -> CsvBS)
     , _alpConnPool    :: Maybe ConnectionPool
     , _alpMinLogLevel :: LogLevel
-#if MIN_VERSION_diagrams_lib(1,3,0)
-    , _alpChartEnv    :: Maybe (DEnv Double)
-#else
-    , _alpChartEnv    :: Maybe DEnv
-#endif
+    , _alpChartEnv    :: Maybe ChartEnv
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
@@ -118,18 +117,22 @@ instance Default ALPState where
         -- , _psSvgs = H.empty
         }
 
+
+
 -- Handler initialisation function - called in Main.hs to create the `Server api`.
 -- Arguments are:
 --  * a `Proxy api` where `api` is the API for the entire app
 --  * the Config for the AEMO portion of the app
 makeAEMOLivePowerServer
     :: (IsElem SVGPath api, IsElem PNGPath api)
-    => Proxy api -> Config -> IO (Either String (Server AEMOLivePower))
-makeAEMOLivePowerServer api conf = do
+    => Proxy api -> Config -> ChartEnv -> IO (Either String (Server AEMOLivePower))
+makeAEMOLivePowerServer api conf env = do
     connStr <- C.require conf "db-conn-string"
     conns <- C.lookupDefault 10 conf "db-connections"
     pool <- runNoLoggingT $ createPostgresqlPool connStr conns
-    env <- {-# SCC "makeAEMOLivePowerServer.defaultEnv" #-} defaultEnv bitmapAlignmentFns 500 300
+
+    -- env <- defaultEnv bitmapAlignmentFns 500 300
+
     ref <- newIORef def {_alpConnPool = Just pool, _alpChartEnv = Just env}
 
     success <- updateALPState api ref

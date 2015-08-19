@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE BangPatterns      #-}
 {-# OPTIONS_GHC -with-rtsopts=-T #-}
 
 module Main where
@@ -42,6 +43,10 @@ import           APVI.LiveSolar
 
 import           AEMO.LivePower
 
+import           Graphics.Rendering.Chart.Backend.Diagrams (createEnv )
+import           Graphics.Rendering.Chart.Easy             hiding (Default)
+import           Util.Charts                               (loadFonts)
+
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.INFO, HSL.ERROR, HSL.WARNING])
 
@@ -56,8 +61,10 @@ appProxy = Proxy
 
 appServer ::Config -> EitherT String IO (Server App)
 appServer conf = do
-    lp <- EitherT $ makeAEMOLivePowerServer appProxy (subconfig "aemo" conf)
-    ls <- EitherT $ makeLiveSolarServer (subconfig "apvi" conf)
+    fontSelector <- liftIO $ loadFonts conf
+    let !env = createEnv bitmapAlignmentFns 500 300 fontSelector
+    lp <- EitherT $ makeAEMOLivePowerServer appProxy (subconfig "aemo" conf) env
+    ls <- EitherT $ makeLiveSolarServer (subconfig "apvi" conf) env
     return $ ls
         :<|> lp
         :<|> serveDirectory "static"

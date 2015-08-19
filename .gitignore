@@ -18,7 +18,7 @@ target
 *.log
 
 # added by GitSavvy
-*.svg
+/*.svg
 
 # added by GitSavvy
 /.stack-work/

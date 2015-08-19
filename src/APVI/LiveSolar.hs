@@ -69,7 +69,7 @@ import           Data.Text.Lens
 
 -- Chart stuff
 import           Graphics.Rendering.Chart.Easy             hiding (Default)
-import           Graphics.Rendering.Chart.Backend.Diagrams (defaultEnv, DEnv)
+import           Graphics.Rendering.Chart.Backend.Diagrams (createEnv, defaultEnv)
 
 import           Data.Time.Clock                           (UTCTime)
 #if MIN_VERSION_time(1,5,0)
@@ -140,11 +140,7 @@ data AppState = AppState {
     , _performanceGraphs     :: !(HashMap Text PngBS)
     , _performanceGraphJSON  :: Value
     , _contributionGraphJSON :: Value
-#if MIN_VERSION_diagrams_lib(1,3,0)
-    , _chartEnv              :: Maybe (DEnv Double)
-#else
-    , _chartEnv              :: Maybe DEnv
-#endif
+    , _chartEnv              :: Maybe ChartEnv
 }
 
 $(makeLenses ''AppState)
@@ -192,9 +188,9 @@ type APVILiveSolar = "v3" :> (
 --         "Australian State name, currently supported are: all, "
 --         ++ intercalate ", " (map (T.unpack . fst) states)
 
-makeLiveSolarServer :: Config ->  IO (Either String (Server APVILiveSolar))
-makeLiveSolarServer conf = do
-    eref <- initialiseLiveSolar conf
+makeLiveSolarServer :: Config -> ChartEnv ->  IO (Either String (Server APVILiveSolar))
+makeLiveSolarServer conf env = do
+    eref <- initialiseLiveSolar conf env
     case eref of
         Left str -> return $ Left str
         Right ref -> return $ Right (
@@ -207,9 +203,8 @@ makeLiveSolarServer conf = do
             )
 
 
-initialiseLiveSolar :: Config -> IO (Either String (IORef AppState))
-initialiseLiveSolar conf = do
-    env <- {-# SCC "initialiseLiveSolar.defaultEnv" #-} defaultEnv bitmapAlignmentFns 500 300
+initialiseLiveSolar :: Config -> ChartEnv -> IO (Either String (IORef AppState))
+initialiseLiveSolar conf env = do
     ref <- newIORef def { _chartEnv = Just env}
     mins <- C.lookupDefault 5 conf "update-frequency"
     initialRetries <- C.lookupDefault 20 conf "initial-retries"
@@ -291,11 +286,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     -- performMajorGC
                     return True
     where
-#if MIN_VERSION_diagrams_lib(1,3,0)
-        renderCharts :: DEnv Double -> (UTCTime,Value) -> TimeZone -> Text
-#else
-        renderCharts :: DEnv -> (UTCTime,Value) -> TimeZone -> Text
-#endif
+        renderCharts :: ChartEnv -> (UTCTime,Value) -> TimeZone -> Text
                      -> Prism' Value Double
                      -> [Text]
                      -> IO ([(Text,PngBS)], Value, Text -> CsvBS)
