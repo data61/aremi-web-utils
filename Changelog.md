@@ -1,3 +1,7 @@
+Version 0.7.1.3
+- Rename Time column since it interacts badly with Terria.
+- Improve other column names.
+
 Version 0.7.1.2
 - Update make_package to include the new fonts path.
 
