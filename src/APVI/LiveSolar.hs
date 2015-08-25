@@ -348,8 +348,12 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
 
         renderCSVs :: Text -> [(Text,[Maybe (UTCTime,Double)])] -> (Text -> CsvBS)
         renderCSVs title allStates =
-            let csvHeader :: Csv.Header
-                csvHeader = V.fromList [encodeUtf8 title,"State", "State name","Time","Image"] :: V.Vector S.ByteString
+            let tTitle = T.toTitle title
+                tTitlePct = T.concat [tTitle, " (%)"]
+                imageTitle = T.concat [tTitle, " over time"]
+
+                csvHeader :: Csv.Header
+                csvHeader = V.fromList [encodeUtf8 tTitlePct,"State", "State name","Received at",encodeUtf8 imageTitle] :: V.Vector S.ByteString
 
                 currentValues :: [(Text,Maybe (UTCTime, Double))]
                 currentValues = map (second maximum) allStates
@@ -358,11 +362,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     map (\(state, mtv)
                         -> H.fromList [
                                 ("State", toField $ lookup state states)
-                                ,("State name", toField state)
-                                ,("Time", toField $ maybe "-" (formatTime defaultTimeLocale "%FT%X") (fst <$> mtv))
-                                ,(encodeUtf8 title, toField $ maybe 0.0 id (snd <$> mtv))
-                                ,("Image", toField $ T.concat ["<img src='http://",hst,"/apvi/v3/"
-                                                              ,title,"/png/",state,"'/>"])
+                                ,("State name", toField (T.toUpper state))
+                                ,("Received at", toField $ maybe "-" (formatTime defaultTimeLocale "%F %X") (fst <$> mtv))
+                                ,(encodeUtf8 tTitlePct, toField $ maybe 0.0 id (snd <$> mtv))
+                                ,(encodeUtf8 imageTitle, toField $
+                                    T.concat ["<img src='http://",hst,"/apvi/v3/",title,"/png/",state,"'/>"])
                             ]
                         )
                         currentValues
