@@ -322,12 +322,10 @@ makeCsv api locs pows dats = let
 
     addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
     addImageTag hst duid rec =
-        -- let encduid = T.pack . urlEncode . T.unpack $ duid
-        let encduid = duid
-            svgProxy = Proxy :: Proxy SVGPath
+        let svgProxy = Proxy :: Proxy SVGPath
             pngProxy = Proxy :: Proxy PNGPath
-            svguri = safeLink api svgProxy encduid
-            pnguri = safeLink api pngProxy encduid
+            svguri = safeLink api svgProxy duid
+            pnguri = safeLink api pngProxy duid
         in H.insert svgKey
             (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show svguri,"'/>"])
             $ H.insert pngKey
