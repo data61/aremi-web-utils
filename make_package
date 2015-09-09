@@ -20,6 +20,6 @@ stack build --optimizations
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
   --absolute-names \
+  fonts \
   -C ${INSTALL_PATH} \
-    apvi-webservice \
-    /home/vagrant/.stack/snapshots/x86_64-*/lts-*/7.*/share/x86_64-*-ghc-7.*/Chart-diagrams-*/fonts
+    apvi-webservice
