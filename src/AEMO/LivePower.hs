@@ -322,7 +322,8 @@ makeCsv api locs pows dats = let
 
     addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
     addImageTag hst duid rec =
-        let encduid = T.pack . urlEncode . T.unpack $ duid
+        -- let encduid = T.pack . urlEncode . T.unpack $ duid
+        let encduid = duid
             svgProxy = Proxy :: Proxy SVGPath
             pngProxy = Proxy :: Proxy PNGPath
             svguri = safeLink api svgProxy encduid
