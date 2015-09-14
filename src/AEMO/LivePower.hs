@@ -6,8 +6,8 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeOperators         #-}
-{-# LANGUAGE BangPatterns          #-}
 
 module AEMO.LivePower where
 
@@ -45,6 +45,8 @@ import           Data.Csv                                  (NamedRecord,
                                                             toNamedRecord)
 import qualified Data.Csv                                  as C
 
+import           Data.Vector                               (Vector)
+
 import           Control.Exception                         (throw)
 
 import           Database.Persist
@@ -61,8 +63,10 @@ import           Data.Default
 import           Util.Periodic
 import           Util.Types
 
-import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString, DEnv ,createEnv, defaultEnv, DFont)
-import           Graphics.Rendering.Chart.Easy             hiding (days)
+import           Graphics.Rendering.Chart.Backend.Diagrams (DEnv, DFont,
+                                                            createEnv,
+                                                            defaultEnv, renderableToSVGString)
+import           Graphics.Rendering.Chart.Easy             hiding (Vector, days)
 import           Util.Charts
 
 
@@ -74,8 +78,8 @@ import           Data.Configurator.Types                   (Config)
 
 import qualified Data.ByteString.Lazy.Char8                as LC8
 
-import           Text.Read                                 (readMaybe)
 import           Text.Printf
+import           Text.Read                                 (readMaybe)
 
 import           Data.String
 
@@ -95,25 +99,37 @@ type AEMOLivePower =
         :<|>
         "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
     )
+    :<|>
+    "v4" :> (
+        "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
+        :<|>
+        "png" :> Capture "DUID" Text :> Get '[PNG] PngBS
+        :<|>
+        "duidcsv" :> Capture "DUID" Text :> Header "Host" Text :> Get '[CSV] CsvBS
+        :<|>
+        "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
+    )
 
 
 
-data ALPState = ALPS
+data ALPState api = ALPS
     { _csvMap         :: HashMap Text (Text -> CsvBS)
     , _alpConnPool    :: Maybe ConnectionPool
     , _alpMinLogLevel :: LogLevel
     , _alpChartEnv    :: Maybe ChartEnv
+    , _alpAPIProxy    :: Proxy api
     -- , _psSvgs           :: HashMap Text CsvBS
 }
 
 $(makeLenses ''ALPState)
 
-instance Default ALPState where
+instance Default (ALPState api) where
     def = ALPS
         { _csvMap = H.empty
         , _alpConnPool = Nothing
         , _alpMinLogLevel = LevelDebug
         , _alpChartEnv = Nothing
+        , _alpAPIProxy = Proxy
         -- , _psSvgs = H.empty
         }
 
@@ -133,7 +149,7 @@ makeAEMOLivePowerServer api conf env = do
 
     -- env <- defaultEnv bitmapAlignmentFns 500 300
 
-    ref <- newIORef def {_alpConnPool = Just pool, _alpChartEnv = Just env}
+    ref <- newIORef def {_alpConnPool = Just pool, _alpChartEnv = Just env, _alpAPIProxy = api}
 
     success <- updateALPState api ref
     if not success
@@ -144,30 +160,63 @@ makeAEMOLivePowerServer api conf env = do
             return . Right $
                 {-v2-} (serveSVGLive ref :<|> serveCSVByTech ref)
                 {-v3-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByTech ref)
+                {-v4-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByDUID ref :<|> serveCSVByTech ref)
 
 -- Runs every `update-frequency` minutes (from Config passed to makeAEMOLivePowerServer)
 -- to update the CSVs returned by serveCSVByTech
 updateALPState
     :: (IsElem SVGPath api, IsElem PNGPath api)
-    => Proxy api -> IORef ALPState -> IO Bool
+    => Proxy api -> IORef (ALPState api) -> IO Bool
 updateALPState api ref = do
-    current <- readIORef ref
     let trav :: Text -> [Filter PowerStation] -> IO (Text -> CsvBS)
         trav _typ filt = do
             (locs,pows,dats) <- getLocs ref filt
-            return $ makeCsv api locs pows dats
+            return $ makeCsv api locs pows dats displayCols
+                             [("MW",                 "Most Recent Output (MW)")
+                             ,("Sample Time (AEST)", "Most Recent Output Time (AEST)")
+                             ]
 
-    csvs <- H.traverseWithKey trav sectors :: IO (HashMap Text (Text -> CsvBS))
+    csvs <- H.traverseWithKey trav techSectors :: IO (HashMap Text (Text -> CsvBS))
 
+    current <- readIORef ref
     writeIORef ref $ current
         & csvMap .~ csvs
     return True
 
 
+displayCols :: Vector C.Name
+displayCols =
+    [ "Station Name"
+    , "Most Recent Output (MW)"
+    , "Most Recent Output Time (AEST)"
+    , "Most Recent % of Max Cap"
+    , "Most Recent % of Reg Cap"
+    , "Max Cap (MW)"
+    , "Reg Cap (MW)"
+    , "Max ROC/Min"
+    , "Unit Size (MW)"
+    , "Physical Unit No."
+    , "Participant"
+    , "Dispatch Type"
+    , "Category"
+    , "Classification"
+    , "Fuel Source - Primary"
+    , "Fuel Source - Descriptor"
+    , "Technology Type - Primary"
+    , "Technology Type - Descriptor"
+    , "Aggregation"
+    , "DUID"
+    , "Lat"
+    , "Lon"
+    -- , svgKey
+    , pngKey
+    ]
+
+
 -- The filters needed to select the correct stations for each technology type
 -- from the database
-sectors :: HashMap Text [Filter PowerStation]
-sectors = H.fromList $
+techSectors :: HashMap Text [Filter PowerStation]
+techSectors = H.fromList $
     [("all"     ,[])
     ,("wind"    ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Wind"])])
     ,("solar"   ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Solar"])])
@@ -193,7 +242,7 @@ sectors = H.fromList $
 -- When given a reference to the app state, produces a handler which accepts
 -- a Text value which specifies which power station to to produce a graph
 -- of the last 24h of generation.
-serveSVGLive :: IORef ALPState -> Text -> EitherT ServantErr IO SvgBS
+serveSVGLive :: IORef (ALPState api) -> Text -> EitherT ServantErr IO SvgBS
 serveSVGLive ref = \duid -> do
     st <- liftIO $ readIORef ref
     let Just pool = st ^. alpConnPool
@@ -211,7 +260,7 @@ serveSVGLive ref = \duid -> do
              return (Tagged svg')
 
 -- Same as serveSVGLive but produces a PNG instead.
-servePNGLive :: IORef ALPState -> Text -> EitherT ServantErr IO PngBS
+servePNGLive :: IORef (ALPState api) -> Text -> EitherT ServantErr IO PngBS
 servePNGLive ref = \duid -> do
     st <- liftIO $ readIORef ref
     let Just pool = st ^. alpConnPool
@@ -232,7 +281,7 @@ servePNGLive ref = \duid -> do
 -- Returns the CSV for the specified technology group. If the Host header is not
 -- present (which is an HTTP/1.1 no-no), or the group isn't known then the
 -- function will fail.
-serveCSVByTech :: IORef ALPState -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
+serveCSVByTech :: IORef (ALPState api) -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
 serveCSVByTech ref = \tech mhost -> do
     st <- liftIO $ readIORef ref
     case (st ^. csvMap . at tech) <*> mhost of
@@ -240,9 +289,68 @@ serveCSVByTech ref = \tech mhost -> do
         Just csv -> return csv
 
 
+serveCSVByDUID :: (IsElem SVGPath api, IsElem PNGPath api)
+               => IORef (ALPState api) -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
+serveCSVByDUID ref = \duid mhost -> do
+    r <- liftIO $ do
+        st <- readIORef ref
+        let Just pool = st ^. alpConnPool
+            lev = st ^. alpMinLogLevel
+        runAppPool pool lev $ runDB $ do
+                mloc    <- selectFirst [DuidLocationDuid ==. duid] []
+                mpow    <- selectFirst [PowerStationDuid ==. duid] []
+                allRecs <- selectList  [PowerStationDatumDuid ==. duid] [Desc PowerStationDatumSampleTime]
+                return $ (st,mloc,mpow,allRecs) -- <$> mloc <*> mpow
+    case r of
+        Left ex
+            -> left err500 {errBody = LC8.pack (show ex)}
+        -- Right Nothing
+            -- -> left err404 {errBody = LC8.pack "DUID not found"}
+        Right (st,mloc,mpow,allRecs)
+            -> maybe (left err404 {errBody = LC8.pack "DUID not found"})
+                     return
+                $ ((\loc pow host -> makeCsv (st ^. alpAPIProxy) [loc] [pow] allRecs duidCols duidSubs host)
+                    <$> mloc <*> mpow <*> mhost)
+
+duidSubs :: [(C.Name,C.Name)]
+duidSubs =
+    [("Most Recent % of Max Cap","% of Max Cap")
+    ,("Most Recent % of Reg Cap","% of Reg Cap")
+    ,("Sample Time (AEST)", "Time (AEST)")
+    ]
+
+duidCols :: Vector C.Name
+duidCols =
+    -- [ "Station Name"
+    [ "Time (AEST)"
+    , "MW"
+    -- , "% of Reg Cap"
+    -- , "% of Max Cap"
+    -- , "Max Cap (MW)"
+    -- , "Reg Cap (MW)"
+    -- , "Max ROC/Min"
+    -- , "Unit Size (MW)"
+    -- , "Physical Unit No."
+    -- , "Participant"
+    -- , "Dispatch Type"
+    -- , "Category"
+    -- , "Classification"
+    -- , "Fuel Source - Primary"
+    -- , "Fuel Source - Descriptor"
+    -- , "Technology Type - Primary"
+    -- , "Technology Type - Descriptor"
+    -- , "Aggregation"
+    -- , "DUID"
+    -- , "Lat"
+    -- , "Lon"
+    -- , svgKey
+    -- , pngKey
+    ]
+
+
 -- Query the database to obtain lists of DuidLocations, PowerStations and PowerStationData
 -- based on the given list of filters to select a technology group.
-getLocs :: IORef ALPState -> [Filter PowerStation] -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
+getLocs :: IORef (ALPState api) -> [Filter PowerStation] -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
 getLocs ref filts = do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
@@ -264,16 +372,27 @@ getLocs ref filts = do
         Left ex -> throw ex
         Right ls -> return ls
 
-type SVGPath = ("aemo" :> "v3" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
-type PNGPath = ("aemo" :> "v3" :> "png" :> Capture "DUID" Text :> Get '[PNG] PngBS)
+type SVGPath = ("aemo" :> "v2" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
+type PNGPath = ("aemo" :> "v4" :> "png" :> Capture "DUID" Text :> Get '[PNG] PngBS)
+
+emptyT :: Text
+emptyT = "-"
+
+svgKey :: IsString a => a
+svgKey = "Latest 24h generation (SVG)"
+
+pngKey :: IsString a => a
+pngKey = "Latest 24h generation"
 
 makeCsv :: (IsElem SVGPath api, IsElem PNGPath api)
         => Proxy api
         -> [Entity DuidLocation]
         -> [Entity PowerStation]
         -> [Entity PowerStationDatum]
+        -> Vector C.Name
+        -> [(C.Name,C.Name)]
         -> (Text -> CsvBS)
-makeCsv api locs pows dats = let
+makeCsv api locs pows dats colNames subs = let
     toLocRec :: DuidLocation -> NamedRecord
     toLocRec dloc = namedRecord
         [ "DUID"    C..= duidLocationDuid dloc
@@ -289,32 +408,24 @@ makeCsv api locs pows dats = let
         . map entityVal
         $ pows
 
-    latestByDuid :: HashMap Text PowerStationDatum
+    latestByDuid :: HashMap Text [PowerStationDatum]
     latestByDuid =
-        H.fromList
+        H.fromListWith (++)
         . map (\psd -> (powerStationDatumDuid psd
-                       , psd))
+                       , [psd]))
         . map entityVal
         $ dats
 
-    replaceKey :: (Hashable k, Eq k) => k -> k -> HashMap k a -> HashMap k a
+    replaceKey :: (Hashable k, Eq k, Show k) => k -> k -> HashMap k a -> HashMap k a
     replaceKey frm too mp = case H.lookup frm mp of -- too used because of Control.Lens.Getter.to
-        Nothing -> mp
+        Nothing -> error $ "replaceKey: Key not found: " ++ show frm -- mp
         Just v  -> H.insert too v (H.delete frm mp)
 
-    emptyT :: Text
-    emptyT = "-"
-
-    svgKey :: IsString a => a
-    svgKey = "Latest 24h generation (SVG)"
-
-    pngKey :: IsString a => a
-    pngKey = "Latest 24h generation"
 
     emptyDatum :: NamedRecord
     emptyDatum = namedRecord
-        [ "Most Recent Output (MW)" C..= emptyT
-        , "Most Recent Output Time (AEST)" C..= emptyT
+        [ "MW" C..= emptyT
+        , "Sample Time (AEST)" C..= emptyT
         , svgKey C..= emptyT
         , pngKey C..= emptyT
         ]
@@ -332,56 +443,35 @@ makeCsv api locs pows dats = let
             (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show pnguri,"'/>"])
             rec
 
-    displayCols =
-        [ "Station Name"
-        , "Most Recent Output (MW)"
-        , "Most Recent Output Time (AEST)"
-        , "Most Recent % of Max Cap"
-        , "Most Recent % of Reg Cap"
-        , "Max Cap (MW)"
-        , "Reg Cap (MW)"
-        , "Max ROC/Min"
-        , "Unit Size (MW)"
-        , "Physical Unit No."
-        , "Participant"
-        , "Dispatch Type"
-        , "Category"
-        , "Classification"
-        , "Fuel Source - Primary"
-        , "Fuel Source - Descriptor"
-        , "Technology Type - Primary"
-        , "Technology Type - Descriptor"
-        , "Aggregation"
-        , "DUID"
-        , "Lat"
-        , "Lon"
-        -- , svgKey
-        , pngKey
-        ]
+    substituteNames :: [(C.Name,C.Name)] -> NamedRecord -> NamedRecord
+    substituteNames subs = foldr (\(from,to) f -> replaceKey from to . f) id subs
+
 
     csv hst = unchunkBS $
-        encodeByName displayCols
+        encodeByName colNames
+        . concat
         . catMaybes
         . map (\loc -> do
             let duid = (duidLocationDuid loc)
             ps <- H.lookup duid powsByDuid
 
-            let (datum, regCapPct, maxCapPct) = case H.lookup duid latestByDuid of
-                    Nothing -> (emptyDatum, Nothing, Nothing)
-                    Just nr -> (addImageTag hst duid . toNamedRecord $ nr
-                                , calculateProdPct powerStationRegCapMW ps nr
-                                , calculateProdPct powerStationMaxCapMW ps nr )
-            return $ H.unions [toLocRec loc
-                              , toNamedRecord ps
-                              , replaceKey "MW" "Most Recent Output (MW)"
-                                . replaceKey "Sample Time (AEST)" "Most Recent Output Time (AEST)"
-                                . toNamedRecord
-                                $ datum
-                              , namedRecord ["Most Recent % of Reg Cap"
-                                C..= (printf "%.2f" <$> regCapPct :: Maybe String)]
-                              , namedRecord ["Most Recent % of Max Cap"
-                                C..= (printf "%.2f" <$> maxCapPct :: Maybe String)]
-                              ]
+            let recs = case H.lookup duid latestByDuid of
+                    Nothing -> [] -- [(emptyDatum, Nothing, Nothing)]
+                    Just nrs -> map (\nr -> (addImageTag hst duid . toNamedRecord $ nr
+                                            , calculateProdPct powerStationRegCapMW ps nr
+                                            , calculateProdPct powerStationMaxCapMW ps nr )
+                                    ) nrs
+            return $ map (\(datum, regCapPct,maxCapPct) ->
+                     substituteNames subs
+                       $ H.unions [toLocRec loc
+                                  , toNamedRecord ps
+                                  , toNamedRecord datum
+                                  , namedRecord ["Most Recent % of Reg Cap"
+                                    C..= (printf "%.2f" <$> regCapPct :: Maybe String)]
+                                  , namedRecord ["Most Recent % of Max Cap"
+                                    C..= (printf "%.2f" <$> maxCapPct :: Maybe String)]
+                                  ]
+                    ) recs
             )
         . map entityVal
         $ locs
