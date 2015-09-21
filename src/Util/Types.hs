@@ -17,7 +17,9 @@ module Util.Types
     , Tagged(..)
     , untag
     , ISOUtcTime(..)
-    , TimeOffsets
+    , TimeOffsets(..)
+    , TimeOffset(..)
+    , TimePeriod(..)
     , modifyTime
     ) where
 
@@ -48,6 +50,8 @@ import           Data.Attoparsec.Text     hiding (D)
 import           Control.Lens
 import           Data.Time.Lens
 import           Numeric.Lens             (integral)
+
+import           Data.Maybe               (fromJust)
 
 -- | `untag` - Useful when you have a lazy ByteString which you know the
 -- content type of, such as from some kind of precomputed value,
@@ -96,20 +100,26 @@ instance FromText ISOUtcTime where
         in fmap ISOUtcTime . timeParser . T.unpack
 
 
-data TimePeriod = Y | M | D | H | Mn deriving Show
+data TimePeriod = Y | M | D | H | Mn deriving (Show,Eq)
 
 data TimeOffset = TimeOffset Int TimePeriod  deriving Show
 
 newtype TimeOffsets = TimeOffsets [TimeOffset] deriving Show
 
-timePeriodMap :: [(Char,TimePeriod)]
+timePeriodMap :: [(TimePeriod,Char)]
 timePeriodMap =
-    [('Y',Y)
-    ,('M',M)
-    ,('D',D)
-    ,('h',H)
-    ,('m',Mn)
+    [(Y,'Y')
+    ,(M,'M')
+    ,(D,'D')
+    ,(H,'h')
+    ,(Mn,'m')
     ]
+
+instance ToText TimeOffsets where
+    toText (TimeOffsets ts) = T.pack
+        $ concatMap (\(TimeOffset n o)
+                    -> show n ++ fromJust (lookup o timePeriodMap):[]
+                    ) ts
 
 instance FromText TimeOffsets where
     fromText t = parseTimeOffsets t
@@ -124,7 +134,7 @@ parseTimeOffsets t = either (const Nothing) Just . flip parseOnly t $
     where
         parsePair = TimeOffset <$> decimal <*> timePeriod
 
-        timePeriod = foldr (\(c,o) r -> (char c *> pure o) <|> r)
+        timePeriod = foldr (\(o,c) r -> (char c *> pure o) <|> r)
                            (fail "expected one of \"ymdh\"")
                            timePeriodMap
 
