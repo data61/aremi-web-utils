@@ -138,7 +138,7 @@ instance Default (ALPState api) where
 --  * a `Proxy api` where `api` is the API for the entire app
 --  * the Config for the AEMO portion of the app
 makeAEMOLivePowerServer
-    :: (IsElem SVGPath api, IsElem PNGPath api)
+    :: (HasAEMOLinks api)
     => Proxy api -> Config -> ChartEnv -> IO (Either String (Server AEMOLivePower))
 makeAEMOLivePowerServer api conf env = do
     connStr <- C.require conf "db-conn-string"
@@ -163,7 +163,7 @@ makeAEMOLivePowerServer api conf env = do
 -- Runs every `update-frequency` minutes (from Config passed to makeAEMOLivePowerServer)
 -- to update the CSVs returned by serveCSVByTech
 updateALPState
-    :: (IsElem SVGPath api, IsElem PNGPath api)
+    :: (HasAEMOLinks api)
     => Proxy api -> IORef (ALPState api) -> IO Bool
 updateALPState api ref = do
     let trav :: Text -> [Filter PowerStation] -> IO (Text -> CsvBS)
@@ -206,6 +206,8 @@ displayCols =
     , "DUID"
     , "Lat"
     , "Lon"
+    , duidCsvKey24h
+    , duidCsvAllKey
     -- , svgKey
     , pngKey
     ]
@@ -214,23 +216,28 @@ displayCols =
 -- The filters needed to select the correct stations for each technology type
 -- from the database
 techSectors :: HashMap Text [Filter PowerStation]
-techSectors = H.fromList $
-    [("all"     ,[])
-    ,("wind"    ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Wind"])])
-    ,("solar"   ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Solar"])])
-    ,("hydro"   ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Hydro"])])
-    ,("fossil"  ,[PowerStationFuelSourcePrimary <-. (Just <$> ["Fossil", "Fuel Oil"])])
-    ,("bio"     ,[PowerStationFuelSourcePrimary <-. (Just <$>
-                                                        ["Biomass"
-                                                        ,"Bagasse"
-                                                        ,"Landfill / Biogas"
-                                                        ,"Landfill, Biogas"
-                                                        ,"Renewable/ Biomass / Waste"
-                                                        ,"Sewerage"
-                                                        ,"Renewable"]
-                                                    )
-                ]
-    )
+techSectors = H.fromList $ map (\(sec,srcs) -> (sec, toInQuery srcs))
+    [("all"       ,[] :: [Text])
+    ,("wind"      ,["Wind"])
+    ,("solar"     ,["Solar"])
+    ,("hydro"     ,["Hydro"])
+    ,("fossil"    ,["Fossil", "Fuel Oil"])
+    ,("bio"       , bioSectors)
+    ,("renewables", ["Solar","Hydro","Wind"] ++ bioSectors)
+    ] where
+        toInQuery :: [Text] -> [Filter PowerStation]
+        toInQuery [] = []
+        toInQuery xs = [PowerStationFuelSourcePrimary <-. (Just <$> xs)]
+
+bioSectors :: [Text]
+bioSectors =
+    ["Biomass"
+    ,"Bagasse"
+    ,"Landfill / Biogas"
+    ,"Landfill, Biogas"
+    ,"Renewable/ Biomass / Waste"
+    ,"Sewerage"
+    ,"Renewable"
     ]
 
 -- =============
@@ -389,8 +396,22 @@ replaceKey frm too mp = case H.lookup frm mp of -- too used because of Control.L
 substituteNames :: [(C.Name,C.Name)] -> NamedRecord -> NamedRecord
 substituteNames subs = foldr (\(frm,too) f -> replaceKey frm too . f) id subs
 
+type HasAEMOLinks api =
+    (IsElem SVGPath api
+    , IsElem PNGPath api
+    , IsElem DUIDCSVPathWithOffset api
+    , IsElem DUIDCSVPath api
+    )
+
 type SVGPath = ("aemo" :> "v2" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
 type PNGPath = ("aemo" :> "v4" :> "png" :> Capture "DUID" Text :> Get '[PNG] PngBS)
+type DUIDCSVPath = ("aemo" :> "v4":> "duidcsv":> Capture "DUID" Text :> Get '[CSV] CsvBS )
+type DUIDCSVPathWithOffset = ("aemo" :> "v4"
+    :> "duidcsv"
+            :> Capture "DUID" Text
+            :> QueryParam "offset" TimeOffsets
+            :> Get '[CSV] CsvBS
+            )
 
 emptyT :: Text
 emptyT = "-"
@@ -401,7 +422,13 @@ svgKey = "Latest 24h generation (SVG)"
 pngKey :: IsString a => a
 pngKey = "Latest 24h generation"
 
-makeCsv :: (IsElem SVGPath api, IsElem PNGPath api)
+duidCsvKey24h :: IsString a => a
+duidCsvKey24h = "CSV for last 24h"
+
+duidCsvAllKey :: IsString a => a
+duidCsvAllKey = "CSV for all data"
+
+makeCsv :: (HasAEMOLinks api)
         => Proxy api
         -> [Entity DuidLocation]
         -> [Entity PowerStation]
@@ -439,19 +466,29 @@ makeCsv api locs pows dats colNames subs = let
         , "Sample Time (AEST)" C..= emptyT
         , svgKey C..= emptyT
         , pngKey C..= emptyT
+        , duidCsvKey24h C..= emptyT
+        , duidCsvAllKey C..= emptyT
         ]
 
 
     addImageTag :: Text -> Text -> NamedRecord -> NamedRecord
     addImageTag hst duid rec =
-        let svgProxy = Proxy :: Proxy SVGPath
-            pngProxy = Proxy :: Proxy PNGPath
-            svguri = safeLink api svgProxy duid
-            pnguri = safeLink api pngProxy duid
+        let svgProxy           = Proxy :: Proxy SVGPath
+            pngProxy           = Proxy :: Proxy PNGPath
+            duidCsvOffsetProxy = Proxy :: Proxy DUIDCSVPathWithOffset
+            duidCsvProxy       = Proxy :: Proxy DUIDCSVPath
+            svgUri             = safeLink api svgProxy duid
+            pngUri             = safeLink api pngProxy duid
+            duidCsv24hUri      = safeLink api duidCsvOffsetProxy duid (TimeOffsets [TimeOffset 24 H])
+            duidCsvUri         = safeLink api duidCsvProxy duid
         in H.insert svgKey
-            (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show svguri,"'/>"])
+            (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show svgUri,"'/>"])
             $ H.insert pngKey
-            (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show pnguri,"'/>"])
+            (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show pngUri,"'/>"])
+            $ H.insert duidCsvKey24h
+            (C.toField $ T.concat ["<a href='http://",hst,"/",T.pack $ show duidCsv24hUri,"'>Download</a>"])
+            $ H.insert duidCsvAllKey
+            (C.toField $ T.concat ["<a href='http://",hst,"/",T.pack $ show duidCsvUri,"'>Download</a>"])
             rec
 
 
