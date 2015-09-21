@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
@@ -15,16 +16,28 @@ module Util.Types
     , unchunkBS
     , Tagged(..)
     , untag
+    , ISOUtcTime(..)
     ) where
 
 import qualified Data.ByteString          as S
 import           Data.ByteString.Lazy     (ByteString)
 import qualified Data.ByteString.Lazy     as BSL
 
+import           Data.Text                as T
+
 import           Network.HTTP.Media       ((//))
 import           Servant.API.ContentTypes
+import           Servant.Common.Text
 
-import Data.Tagged
+import           Data.Time.Clock          (UTCTime)
+#if MIN_VERSION_time(1,5,0)
+import           Data.Time.Format         (defaultTimeLocale, parseTimeM)
+#else
+import           Data.Time.Format         (parseTime)
+import           System.Locale            (defaultTimeLocale)
+#endif
+
+import           Data.Tagged
 
 
 -- | `untag` - Useful when you have a lazy ByteString which you know the
@@ -57,3 +70,18 @@ type ETag = S.ByteString
 
 unchunkBS :: ByteString -> ByteString
 unchunkBS = BSL.fromStrict . BSL.toStrict
+
+newtype ISOUtcTime = ISOUtcTime {unISOUtc :: UTCTime} deriving Show
+
+instance FromText ISOUtcTime where
+    fromText =
+        let
+            formatStr :: String
+            formatStr = "%FT%T%z"
+            timeParser :: String -> Maybe UTCTime
+#if MIN_VERSION_time(1,5,0)
+            timeParser = parseTimeM True defaultTimeLocale formatStr
+#else
+            timeParser = parseTime defaultTimeLocale formatStr
+#endif
+        in fmap ISOUtcTime . timeParser . T.unpack
