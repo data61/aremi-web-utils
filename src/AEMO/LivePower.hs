@@ -12,9 +12,7 @@
 module AEMO.LivePower where
 
 
-#if !MIN_VERSION_base(4,8,0)
-import           Control.Applicative
-#endif
+import           Control.Applicative                       ((<|>))
 import           Control.Lens                              hiding ((<.))
 
 import           Data.Text                                 (Text)
@@ -104,6 +102,7 @@ type AEMOLivePower =
             :> Capture "DUID" Text
             :> QueryParam "startTime" ISOUtcTime
             :> QueryParam "endTime" ISOUtcTime
+            :> QueryParam "offset" TimeOffsets
             :> Get '[CSV] CsvBS
         :<|>
         "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
@@ -292,24 +291,26 @@ serveCSVByDUID :: (IsElem SVGPath api, IsElem PNGPath api)
                => IORef (ALPState api)
                -> Text
                -> Maybe ISOUtcTime -> Maybe ISOUtcTime -- start and end times for data
+               -> Maybe TimeOffsets -- Time offset from now, eg "1Y6M" for 1 year and 6 months, supports YMDhm
                -> EitherT ServantErr IO CsvBS
-serveCSVByDUID ref = \duid mstart mend -> do
+serveCSVByDUID ref = \duid mstart mend moff -> do
     r <- liftIO $ do
         st <- readIORef ref
+        moff' <- case moff of
+            Nothing -> pure Nothing
+            Just offs ->  Just . modifyTime offs <$> getCurrentTime
+
         let Just pool = st ^. alpConnPool
             lev = st ^. alpMinLogLevel
 
-        putStrLn $ "Started query" ++ show (mstart, mend)
-        r <- runAppPool pool lev $ runDB $
+        runAppPool pool lev $ runDB $
                 selectList ([PowerStationDatumDuid ==. duid]
                             ++ catMaybes
-                                [((PowerStationDatumSampleTime >=.) . unISOUtc) <$> mstart
+                                [ (PowerStationDatumSampleTime >=.) <$> (moff' <|> (unISOUtc <$> mstart))
                                 ,((PowerStationDatumSampleTime <=.) . unISOUtc) <$> mend
                                 ]
                             )
                            [Asc PowerStationDatumSampleTime]
-        putStrLn "Ended query"
-        return r
     case r of
         Left ex
             -> left err500 {errBody = LC8.pack (show ex)}

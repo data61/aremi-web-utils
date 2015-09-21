@@ -17,13 +17,15 @@ module Util.Types
     , Tagged(..)
     , untag
     , ISOUtcTime(..)
+    , TimeOffsets
+    , modifyTime
     ) where
 
 import qualified Data.ByteString          as S
 import           Data.ByteString.Lazy     (ByteString)
 import qualified Data.ByteString.Lazy     as BSL
 
-import           Data.Text                as T
+import qualified Data.Text                as T
 
 import           Network.HTTP.Media       ((//))
 import           Servant.API.ContentTypes
@@ -39,6 +41,13 @@ import           System.Locale            (defaultTimeLocale)
 
 import           Data.Tagged
 
+import           Control.Applicative
+import           Data.Attoparsec.Text     hiding (D)
+
+
+import           Control.Lens
+import           Data.Time.Lens
+import           Numeric.Lens             (integral)
 
 -- | `untag` - Useful when you have a lazy ByteString which you know the
 -- content type of, such as from some kind of precomputed value,
@@ -85,3 +94,46 @@ instance FromText ISOUtcTime where
             timeParser = parseTime defaultTimeLocale formatStr
 #endif
         in fmap ISOUtcTime . timeParser . T.unpack
+
+
+data TimePeriod = Y | M | D | H | Mn deriving Show
+
+data TimeOffset = TimeOffset Int TimePeriod  deriving Show
+
+newtype TimeOffsets = TimeOffsets [TimeOffset] deriving Show
+
+timePeriodMap :: [(Char,TimePeriod)]
+timePeriodMap =
+    [('Y',Y)
+    ,('M',M)
+    ,('D',D)
+    ,('h',H)
+    ,('m',Mn)
+    ]
+
+instance FromText TimeOffsets where
+    fromText t = parseTimeOffsets t
+
+parseTimeOffsets :: T.Text -> Maybe TimeOffsets
+parseTimeOffsets t = either (const Nothing) Just . flip parseOnly t $
+    TimeOffsets <$> (
+        many1 parsePair <* endOfInput
+        <|> pure []
+        )
+
+    where
+        parsePair = TimeOffset <$> decimal <*> timePeriod
+
+        timePeriod = foldr (\(c,o) r -> (char c *> pure o) <|> r)
+                           (fail "expected one of \"ymdh\"")
+                           timePeriodMap
+
+modifyTime :: FlexibleDateTime t => TimeOffsets -> t -> t
+modifyTime (TimeOffsets ts) t = t & flexDT %~ adjust where
+    adjust = foldr (\(TimeOffset n o) r -> (fromOff o -~ n) . r) id ts
+    fromOff o = case o of
+        Y -> years . integral
+        M -> months
+        D -> days
+        H -> hours
+        Mn -> minutes
