@@ -15,13 +15,10 @@ module AEMO.LivePower where
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
 #endif
-import           Control.Lens
+import           Control.Lens                              hiding ((<.))
 
 import           Data.Text                                 (Text)
 import qualified Data.Text                                 as T
-
-
-import           Network.HTTP.Base                         (urlEncode)
 
 import           Data.Hashable
 import           Data.HashMap.Strict                       (HashMap)
@@ -63,10 +60,8 @@ import           Data.Default
 import           Util.Periodic
 import           Util.Types
 
-import           Graphics.Rendering.Chart.Backend.Diagrams (DEnv, DFont,
-                                                            createEnv,
-                                                            defaultEnv, renderableToSVGString)
-import           Graphics.Rendering.Chart.Easy             hiding (Vector, days)
+import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
+import           Graphics.Rendering.Chart.Easy             hiding (Vector, days, (<.))
 import           Util.Charts
 
 
@@ -105,7 +100,11 @@ type AEMOLivePower =
         :<|>
         "png" :> Capture "DUID" Text :> Get '[PNG] PngBS
         :<|>
-        "duidcsv" :> Capture "DUID" Text :> Header "Host" Text :> Get '[CSV] CsvBS
+        "duidcsv"
+            :> Capture "DUID" Text
+            :> QueryParam "startTime" ISOUtcTime
+            :> QueryParam "endTime" ISOUtcTime
+            :> Get '[CSV] CsvBS
         :<|>
         "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
     )
@@ -290,34 +289,40 @@ serveCSVByTech ref = \tech mhost -> do
 
 
 serveCSVByDUID :: (IsElem SVGPath api, IsElem PNGPath api)
-               => IORef (ALPState api) -> Text -> Maybe Text -> EitherT ServantErr IO CsvBS
-serveCSVByDUID ref = \duid mhost -> do
+               => IORef (ALPState api)
+               -> Text
+               -> Maybe ISOUtcTime -> Maybe ISOUtcTime -- start and end times for data
+               -> EitherT ServantErr IO CsvBS
+serveCSVByDUID ref = \duid mstart mend -> do
     r <- liftIO $ do
         st <- readIORef ref
         let Just pool = st ^. alpConnPool
             lev = st ^. alpMinLogLevel
-        runAppPool pool lev $ runDB $ do
-                mloc    <- selectFirst [DuidLocationDuid ==. duid] []
-                mpow    <- selectFirst [PowerStationDuid ==. duid] []
-                allRecs <- selectList  [PowerStationDatumDuid ==. duid] [Desc PowerStationDatumSampleTime]
-                return $ (st,mloc,mpow,allRecs) -- <$> mloc <*> mpow
+
+        putStrLn $ "Started query" ++ show (mstart, mend)
+        r <- runAppPool pool lev $ runDB $
+                selectList ([PowerStationDatumDuid ==. duid]
+                            ++ catMaybes
+                                [((PowerStationDatumSampleTime >=.) . unISOUtc) <$> mstart
+                                ,((PowerStationDatumSampleTime <=.) . unISOUtc) <$> mend
+                                ]
+                            )
+                           [Asc PowerStationDatumSampleTime]
+        putStrLn "Ended query"
+        return r
     case r of
         Left ex
             -> left err500 {errBody = LC8.pack (show ex)}
-        -- Right Nothing
-            -- -> left err404 {errBody = LC8.pack "DUID not found"}
-        Right (st,mloc,mpow,allRecs)
-            -> maybe (left err404 {errBody = LC8.pack "DUID not found"})
-                     return
-                $ ((\loc pow host -> makeCsv (st ^. alpAPIProxy) [loc] [pow] allRecs duidCols duidSubs host)
-                    <$> mloc <*> mpow <*> mhost)
+        Right allRecs
+            -> pure . Tagged . encodeByName duidCols
+                . map (substituteNames duidSubs . toNamedRecord . entityVal)
+                $ allRecs
 
 duidSubs :: [(C.Name,C.Name)]
 duidSubs =
-    [("Most Recent % of Max Cap","% of Max Cap")
-    ,("Most Recent % of Reg Cap","% of Reg Cap")
-    ,("Sample Time (AEST)", "Time (AEST)")
+    [("Sample Time (AEST)", "Time (AEST)")
     ]
+
 
 duidCols :: Vector C.Name
 duidCols =
@@ -372,6 +377,17 @@ getLocs ref filts = do
         Left ex -> throw ex
         Right ls -> return ls
 
+
+
+replaceKey :: (Hashable k, Eq k, Show k) => k -> k -> HashMap k a -> HashMap k a
+replaceKey frm too mp = case H.lookup frm mp of -- too used because of Control.Lens.Getter.to
+    Nothing -> error $ "replaceKey: Key not found: " ++ show frm -- mp
+    Just v  -> H.insert too v (H.delete frm mp)
+
+
+substituteNames :: [(C.Name,C.Name)] -> NamedRecord -> NamedRecord
+substituteNames subs = foldr (\(frm,too) f -> replaceKey frm too . f) id subs
+
 type SVGPath = ("aemo" :> "v2" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
 type PNGPath = ("aemo" :> "v4" :> "png" :> Capture "DUID" Text :> Get '[PNG] PngBS)
 
@@ -416,14 +432,8 @@ makeCsv api locs pows dats colNames subs = let
         . map entityVal
         $ dats
 
-    replaceKey :: (Hashable k, Eq k, Show k) => k -> k -> HashMap k a -> HashMap k a
-    replaceKey frm too mp = case H.lookup frm mp of -- too used because of Control.Lens.Getter.to
-        Nothing -> error $ "replaceKey: Key not found: " ++ show frm -- mp
-        Just v  -> H.insert too v (H.delete frm mp)
-
-
-    emptyDatum :: NamedRecord
-    emptyDatum = namedRecord
+    _emptyDatum :: NamedRecord
+    _emptyDatum = namedRecord
         [ "MW" C..= emptyT
         , "Sample Time (AEST)" C..= emptyT
         , svgKey C..= emptyT
@@ -442,9 +452,6 @@ makeCsv api locs pows dats colNames subs = let
             $ H.insert pngKey
             (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show pnguri,"'/>"])
             rec
-
-    substituteNames :: [(C.Name,C.Name)] -> NamedRecord -> NamedRecord
-    substituteNames subs = foldr (\(from,to) f -> replaceKey from to . f) id subs
 
 
     csv hst = unchunkBS $
