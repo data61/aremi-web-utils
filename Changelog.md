@@ -1,3 +1,21 @@
+Version 0.8.0.0
+ - Adds ability to download information about a particular DUID as a CSV using either `{start,end}Time=<date as "%Y-%M-%DT%h:%m:%s%z">`, eg. "2015-08-08T01:00:00+1000" or using `offset=1Y2M3D4h5m`
+
+  Other:
+   - Add links to download DUID data as CSV, add "renewables" category available at `/aemo/v4/csv/renewables`
+   - Export and add ToText instance for TimePeriod to make queries using safeLink
+   - Add support for specifying an offset to get DUID CSV data back to
+   - Allow DUID CSV data to specify start and end times as URL params
+   - Add ISOUtcTime to parse ISO8601 formatted timestamps in URLs
+   - Bump version to 0.8.0.0, fix call to --with-rtsopts in ghc-options
+   - Add v4 API which allows downloading of CSV of all data for every DUID
+   - Reduce frequency of idle time full GC to reduce CPU usage
+   - Remove comment and redundant let for duid in URL
+   - Don't URL encode things (happens automatically), add deps to 2.19 stack.yaml
+
+  Contributors:
+   - Alex Mason
+
 Version 0.7.1.3
 - Rename Time column since it interacts badly with Terria.
 - Improve other column names.
