@@ -66,10 +66,7 @@ import qualified Data.Aeson                                as A
 import           Data.Aeson.Lens                           as AL
 import           Data.Text.Lens
 
-
--- Chart stuff
 import           Graphics.Rendering.Chart.Easy             hiding (Default)
-import           Graphics.Rendering.Chart.Backend.Diagrams (createEnv, defaultEnv)
 
 import           Data.Time.Clock                           (UTCTime)
 #if MIN_VERSION_time(1,5,0)
@@ -207,16 +204,16 @@ initialiseLiveSolar :: Config -> ChartEnv -> IO (Either String (IORef AppState))
 initialiseLiveSolar conf env = do
     ref <- newIORef def { _chartEnv = Just env}
     mins <- C.lookupDefault 5 conf "update-frequency"
-    initialRetries <- C.lookupDefault 20 conf "initial-retries"
+    -- initialRetries <- C.lookupDefault 20 conf "initial-retries"
 
 
-    success <- updateRef initialRetries ref
-    if success
-        then do
-            retries <- C.lookupDefault 10 conf "retries"
-            _tid <- updateRef retries ref `every` (fromInteger mins :: Minute)
-            return $ Right ref
-        else return $ Left "Failed to initialise live solar data"
+    -- success <- updateRef initialRetries ref
+    -- if success
+    --     then do
+    retries <- C.lookupDefault 10 conf "retries"
+    _tid <- updateRef retries ref `every` (fromInteger mins :: Minute)
+    return $ Right ref
+        -- else return $ Left "Failed to initialise live solar data"
 
 -- type APVIPerformanceSVGPath = "aemo" :> "v2" :> "performance" :> "svg" :> Capture "state" Text
 -- type APVIContributionSVGPath = "aemo" :> "v2" :> "contribution" :> "svg" :> Capture "state" Text

@@ -27,7 +27,6 @@ import qualified Data.Text                                 as T
 import qualified Data.Configurator                         as C
 import           Data.Configurator.Types                   (Config)
 
-import qualified Graphics.SVGFonts.CharReference           as F
 import qualified Graphics.SVGFonts.ReadFont                as F
 
 import           Control.Concurrent.Async (mapConcurrently)
