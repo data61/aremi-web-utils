@@ -1,3 +1,6 @@
+Version 0.8.1.0
+- Remove APVI initialisation so service can launch when APVI are down, returning 404s for requests
+
 Version 0.8.0.0
  - Adds ability to download information about a particular DUID as a CSV using either `{start,end}Time=<date as "%Y-%M-%DT%h:%m:%s%z">`, eg. "2015-08-08T01:00:00+1000" or using `offset=1Y2M3D4h5m`
 
