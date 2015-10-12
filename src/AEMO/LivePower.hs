@@ -363,24 +363,44 @@ duidCols =
 
 -- Query the database to obtain lists of DuidLocations, PowerStations and PowerStationData
 -- based on the given list of filters to select a technology group.
-getLocs :: IORef (ALPState api) -> [Filter PowerStation] -> IO ([Entity DuidLocation],[Entity PowerStation],[Entity PowerStationDatum])
+getLocs :: IORef (ALPState api)
+        -> [Text]
+        -> IO ( [Entity DuidLocation]
+              , [Entity PowerStation]
+              , [Entity PowerStationDatum]
+              , HashMap Text UTCTime
+              )
 getLocs ref filts = do
     st <- readIORef ref
     let Just pool = st ^. alpConnPool
         lev = st ^. alpMinLogLevel
     r <- runAppPool pool lev $ do
         runDB $ do
-            locs <- selectList [] []
-            pows <- selectList filts []
-            mrecent <- selectFirst [] [Desc PowerStationDatumSampleTime]
+            mrecent <- E.select $ E.from $ \datum -> do
+                pure (E.max_ (datum E.^. PowerStationDatumSampleTime))
+
+            locs <- E.select $ E.from $ pure
+            pows <- E.select $ E.from $ \ps -> do
+                if null filts
+                    then return ()
+                    else E.where_ (ps E.^. PowerStationFuelSourcePrimary `E.in_` E.valList (map Just filts))
+                return ps
+
+            latests :: [(Single Text, Single UTCTime)]
+                <- withResource pool $ \sqlbknd -> do
+                    liftIO $ flip runReaderT sqlbknd $
+                        rawSql "SELECT duid, sample_time FROM latest_power_station_datum;"
+                               []
+            let timeMap = H.fromList . map (unSingle *** unSingle) $ latests
+
             case mrecent of
-                Nothing -> error "Database has no PowerStationData"
-                Just epsd -> do
-                    -- TODO: this is fragile and doesn't return the most recent for each DUID
-                    --       only the values which have samples equal to the latest.
-                    dats <- selectList [PowerStationDatumSampleTime
-                                        ==. powerStationDatumSampleTime (entityVal epsd)] []
-                    return (locs, pows, dats)
+                [] -> error "Database has no PowerStationData"
+                [E.Value Nothing] -> error "Database has no PowerStationData"
+                [E.Value (Just epsd)] -> do
+                    dats <- E.select $ E.from $ \dat -> do
+                        E.where_ (dat E.^. PowerStationDatumSampleTime E.==. E.val epsd)
+                        pure dat :: E.SqlQuery (E.SqlExpr (Entity PowerStationDatum))
+                    return (locs, pows, dats, timeMap)
     case r of
         Left ex -> throw ex
         Right ls -> return ls
