@@ -13,6 +13,7 @@ module AEMO.LivePower where
 
 
 import           Control.Applicative                       ((<|>))
+import           Control.Arrow                             ((***))
 import           Control.Lens                              hiding ((<.))
 
 import           Data.Text                                 (Text)
@@ -22,15 +23,28 @@ import           Data.Hashable
 import           Data.HashMap.Strict                       (HashMap)
 import qualified Data.HashMap.Strict                       as H
 
-import           Data.Maybe                                (catMaybes)
+import           Data.Maybe                                (catMaybes,
+                                                            fromMaybe)
+
+import           Data.List                                 (sortBy)
+import           Data.Ord                                  (comparing)
 
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
                                                             writeIORef)
 
-import           Data.Time.Clock                           (getCurrentTime)
+import           Data.Time.Clock                           (UTCTime,
+                                                            getCurrentTime)
 import           Data.Time.Lens
 import           Data.Time.LocalTime
+#if MIN_VERSION_time(1,5,0)
+import           Data.Time.Format                          (defaultTimeLocale,
+                                                            formatTime)
+#else
+import           Data.Time.Format                          (formatTime)
+import           System.Locale                             (defaultTimeLocale)
+#endif
+
 
 import           Control.Monad.IO.Class
 
@@ -47,6 +61,9 @@ import           Control.Exception                         (throw)
 import           Database.Persist
 import           Database.Persist.Postgresql
 -- import Database.Persist.Class
+import           Database.Esqueleto                        ()
+import qualified Database.Esqueleto                        as E
+
 
 import           Control.Monad.Trans.Either
 import           Servant
@@ -59,7 +76,8 @@ import           Util.Periodic
 import           Util.Types
 
 import           Graphics.Rendering.Chart.Backend.Diagrams (renderableToSVGString)
-import           Graphics.Rendering.Chart.Easy             hiding (Vector, days, (<.))
+import           Graphics.Rendering.Chart.Easy             hiding (Vector, days,
+                                                            (<.))
 import           Util.Charts
 
 
@@ -75,6 +93,10 @@ import           Text.Printf
 import           Text.Read                                 (readMaybe)
 
 import           Data.String
+
+
+import           Control.Monad.Reader                      (runReaderT)
+import           Data.Pool                                 (withResource)
 
 
 
@@ -421,7 +443,7 @@ substituteNames :: [(C.Name,C.Name)] -> NamedRecord -> NamedRecord
 substituteNames subs = foldr (\(frm,too) f -> replaceKey frm too . f) id subs
 
 type HasAEMOLinks api =
-    (IsElem SVGPath api
+    ( IsElem SVGPath api
     , IsElem PNGPath api
     , IsElem DUIDCSVPathWithOffset api
     , IsElem DUIDCSVPath api
