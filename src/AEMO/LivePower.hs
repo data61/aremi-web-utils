@@ -166,15 +166,15 @@ updateALPState
     :: (HasAEMOLinks api)
     => Proxy api -> IORef (ALPState api) -> IO Bool
 updateALPState api ref = do
-    let trav :: Text -> [Filter PowerStation] -> IO (Text -> CsvBS)
+    let trav :: Text -> [Text] -> IO (Text -> CsvBS)
         trav _typ filt = do
-            (locs,pows,dats) <- getLocs ref filt
-            return $ makeCsv api locs pows dats displayCols
+            (locs,pows,dats, timeMap) <- getLocs ref filt
+            return $ makeCsv api locs pows dats timeMap displayCols
                              [("MW",                 "Most Recent Output (MW)")
                              ,("Sample Time (AEST)", "Most Recent Output Time (AEST)")
                              ]
 
-    csvs <- H.traverseWithKey trav techSectors :: IO (HashMap Text (Text -> CsvBS))
+    csvs <- H.traverseWithKey trav (H.fromList sectorMap) :: IO (HashMap Text (Text -> CsvBS))
 
     current <- readIORef ref
     writeIORef ref $ current
@@ -216,18 +216,22 @@ displayCols =
 -- The filters needed to select the correct stations for each technology type
 -- from the database
 techSectors :: HashMap Text [Filter PowerStation]
-techSectors = H.fromList $ map (\(sec,srcs) -> (sec, toInQuery srcs))
-    [("all"       ,[] :: [Text])
+techSectors = H.fromList $ map (\(sec,srcs) -> (sec, toInQuery srcs)) sectorMap
+    where
+        toInQuery :: [Text] -> [Filter PowerStation]
+        toInQuery [] = []
+        toInQuery xs = [PowerStationFuelSourcePrimary <-. (Just <$> xs)]
+
+sectorMap :: [(Text,[Text])]
+sectorMap =
+    [("all"       ,[])
     ,("wind"      ,["Wind"])
     ,("solar"     ,["Solar"])
     ,("hydro"     ,["Hydro"])
     ,("fossil"    ,["Fossil", "Fuel Oil"])
     ,("bio"       , bioSectors)
     ,("renewables", ["Solar","Hydro","Wind"] ++ bioSectors)
-    ] where
-        toInQuery :: [Text] -> [Filter PowerStation]
-        toInQuery [] = []
-        toInQuery xs = [PowerStationFuelSourcePrimary <-. (Just <$> xs)]
+    ]
 
 bioSectors :: [Text]
 bioSectors =
@@ -453,10 +457,11 @@ makeCsv :: (HasAEMOLinks api)
         -> [Entity DuidLocation]
         -> [Entity PowerStation]
         -> [Entity PowerStationDatum]
+        -> HashMap Text UTCTime
         -> Vector C.Name
         -> [(C.Name,C.Name)]
         -> (Text -> CsvBS)
-makeCsv api locs pows dats colNames subs = let
+makeCsv api locs pows dats timeMap colNames subs = let
     toLocRec :: DuidLocation -> NamedRecord
     toLocRec dloc = namedRecord
         [ "DUID"    C..= duidLocationDuid dloc
@@ -495,17 +500,21 @@ makeCsv api locs pows dats colNames subs = let
     addImageTag hst duid rec =
         let svgProxy           = Proxy :: Proxy SVGPath
             pngProxy           = Proxy :: Proxy PNGPath
-            duidCsvOffsetProxy = Proxy :: Proxy DUIDCSVPathWithOffset
-            duidCsvProxy       = Proxy :: Proxy DUIDCSVPath
             svgUri             = safeLink api svgProxy duid
             pngUri             = safeLink api pngProxy duid
-            duidCsv24hUri      = safeLink api duidCsvOffsetProxy duid (TimeOffsets [TimeOffset 24 H])
-            duidCsvUri         = safeLink api duidCsvProxy duid
-        in H.insert svgKey
+        in   H.insert svgKey
             (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show svgUri,"'/>"])
             $ H.insert pngKey
             (C.toField $ T.concat ["<img src='http://",hst,"/",T.pack $ show pngUri,"'/>"])
-            $ H.insert duidCsvKey24h
+            rec
+
+    addCsvLinks :: Text -> Text -> NamedRecord -> NamedRecord
+    addCsvLinks hst duid rec =
+        let duidCsvOffsetProxy = Proxy :: Proxy DUIDCSVPathWithOffset
+            duidCsvProxy       = Proxy :: Proxy DUIDCSVPath
+            duidCsv24hUri      = safeLink api duidCsvOffsetProxy duid (TimeOffsets [TimeOffset 24 H])
+            duidCsvUri         = safeLink api duidCsvProxy duid
+        in H.insert duidCsvKey24h
             (C.toField $ T.concat ["<a href='http://",hst,"/",T.pack $ show duidCsv24hUri,"'>Download</a>"])
             $ H.insert duidCsvAllKey
             (C.toField $ T.concat ["<a href='http://",hst,"/",T.pack $ show duidCsvUri,"'>Download</a>"])
@@ -521,20 +530,25 @@ makeCsv api locs pows dats colNames subs = let
             ps <- H.lookup duid powsByDuid
 
             let recs = case H.lookup duid latestByDuid of
-                    Nothing -> [] -- [(emptyDatum, Nothing, Nothing)]
-                    Just nrs -> map (\nr -> (addImageTag hst duid . toNamedRecord $ nr
-                                            , calculateProdPct powerStationRegCapMW ps nr
-                                            , calculateProdPct powerStationMaxCapMW ps nr )
-                                    ) nrs
+                    Nothing -> [(_emptyDatum, Nothing, Nothing)]
+                    Just psds -> map (\psd -> (addImageTag hst duid . toNamedRecord $ psd
+                                            , calculateProdPct powerStationRegCapMW ps psd
+                                            , calculateProdPct powerStationMaxCapMW ps psd )
+                                    ) psds
             return $ map (\(datum, regCapPct,maxCapPct) ->
-                     substituteNames subs
+                    let latestTime = H.lookup duid timeMap
+                        timeString = fmap (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z". utcToZonedTime aest)
+                                          latestTime
+                    in substituteNames subs
                        $ H.unions [toLocRec loc
                                   , toNamedRecord ps
-                                  , toNamedRecord datum
+                                  , H.insert "Sample Time (AEST)"
+                                                (C.toField $ fromMaybe "-" timeString)
+                                                (addCsvLinks hst duid datum)
                                   , namedRecord ["Most Recent % of Reg Cap"
-                                    C..= (printf "%.2f" <$> regCapPct :: Maybe String)]
+                                    C..= (fromMaybe "-" $ printf "%.2f" <$> regCapPct :: String)]
                                   , namedRecord ["Most Recent % of Max Cap"
-                                    C..= (printf "%.2f" <$> maxCapPct :: Maybe String)]
+                                    C..= (fromMaybe "-" $ printf "%.2f" <$> maxCapPct :: String)]
                                   ]
                     ) recs
             )
