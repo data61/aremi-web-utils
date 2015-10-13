@@ -15,7 +15,7 @@ DESCRIBE=$(git describe)
 INSTALL_PATH='.stack-work/install/x86_64-*/lts-*/7.*/bin'
 
 stack clean
-stack build --optimizations
+stack build
 
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
