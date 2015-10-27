@@ -123,8 +123,10 @@ import           Util.Periodic
 import           Util.Types
 import           Util.Web
 
+import Text.Printf (printf)
 
-$(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING])
+
+$(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING, HSL.INFO])
 
 
 
@@ -222,10 +224,13 @@ initialiseLiveSolar conf env = do
 -- data for today.
 updateRef :: Int -> IORef AppState -> IO Bool
 updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeException)) >> return False) $ do
+    infoM "Starting update"
     now <- getZonedTime
     let day = localDay . zonedTimeToLocalTime $ now
         tz = zonedTimeZone now
-        url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
+        secretToken = "m181rsunPwre71io" :: String
+        -- url = formatTime defaultTimeLocale "http://pv-map.apvi.org.au/data/%F" day
+        url = printf "http://pv-map.apvi.org.au/api/v1/data/today.json?access_token=%s" secretToken
     current <- readIORef ref
 #if MIN_VERSION_http_conduit(2,1,6)
     m <- newManager tlsManagerSettings
