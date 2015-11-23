@@ -192,7 +192,7 @@ updateALPState api ref = do
         trav _typ filt = do
             (locs,pows,dats, timeMap) <- getLocs ref filt
             return $ makeCsv api locs pows dats timeMap displayCols
-                             [("MW",                 "Most Recent Output (MW)")
+                             [("MW",                 "Current Output (MW)")
                              ,("Sample Time (AEST)", "Most Recent Output Time (AEST)")
                              ]
 
@@ -207,10 +207,10 @@ updateALPState api ref = do
 displayCols :: Vector C.Name
 displayCols =
     [ "Station Name"
-    , "Most Recent Output (MW)"
+    , "Current Output (MW)"
     , "Most Recent Output Time (AEST)"
-    , "Most Recent % of Max Cap"
-    , "Most Recent % of Reg Cap"
+    , "Current % of Max Cap"
+    , "Current % of Reg Cap"
     , "Max Cap (MW)"
     , "Reg Cap (MW)"
     , "Max ROC/Min"
@@ -567,9 +567,9 @@ makeCsv api locs pows dats timeMap colNames subs = let
                                   , H.insert "Sample Time (AEST)"
                                                 (C.toField $ fromMaybe "-" timeString)
                                                 (addCsvLinks hst duid datum)
-                                  , namedRecord ["Most Recent % of Reg Cap"
+                                  , namedRecord ["Current % of Reg Cap"
                                     C..= (fromMaybe "-" $ printf "%.2f" <$> regCapPct :: String)]
-                                  , namedRecord ["Most Recent % of Max Cap"
+                                  , namedRecord ["Current % of Max Cap"
                                     C..= (fromMaybe "-" $ printf "%.2f" <$> maxCapPct :: String)]
                                   ]
                     ) recs

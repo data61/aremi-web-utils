@@ -1,3 +1,5 @@
+- Change "Most Recent" to "Current" for generation values (leaving "Most Recent Sample Time" as is).
+
 Version 0.8.1.0
 - Remove APVI initialisation so service can launch when APVI are down, returning 404s for requests
 
