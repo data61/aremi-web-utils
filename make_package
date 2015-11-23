@@ -20,6 +20,7 @@ stack build
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
   --absolute-names \
+  Changelog.md \
   fonts \
   -C ${INSTALL_PATH} \
     apvi-webservice
