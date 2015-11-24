@@ -21,4 +21,5 @@ target
 /*.svg
 
 # added by GitSavvy
-/.stack-work/
+.stack-work/
+*/.stack-work/
