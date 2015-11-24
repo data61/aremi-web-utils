@@ -1,7 +1,6 @@
 flags: {}
 packages:
 - '.'
-- ../libraries/AEMO-archiver/
 - ../aremi-web-utils/
 extra-deps:
 - time-units-1.0.0
