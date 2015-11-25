@@ -1,7 +1,13 @@
-Version 0.8.1.0
+### Version 0.8.2.1
+- Change "Most Recent" to "Current" for generation values (leaving "Most Recent Sample Time" as is).
+
+### Version 0.8.2.0
+- Use APVI API key.
+
+### Version 0.8.1.0
 - Remove APVI initialisation so service can launch when APVI are down, returning 404s for requests
 
-Version 0.8.0.0
+### Version 0.8.0.0
  - Adds ability to download information about a particular DUID as a CSV using either `{start,end}Time=<date as "%Y-%M-%DT%h:%m:%s%z">`, eg. "2015-08-08T01:00:00+1000" or using `offset=1Y2M3D4h5m`
 
   Other:
@@ -19,21 +25,21 @@ Version 0.8.0.0
   Contributors:
    - Alex Mason
 
-Version 0.7.1.3
+### Version 0.7.1.3
 - Rename Time column since it interacts badly with Terria.
 - Improve other column names.
 
-Version 0.7.1.2
+### Version 0.7.1.2
 - Update make_package to include the new fonts path.
 
-Version 0.7.1.1
+### Version 0.7.1.1
 - Forgotten liftIO import fixed
 
-Version 0.7.1.0
+### Version 0.7.1.0
 - Font location can now be configured in the config using "font-path" key, defaults to ./fonts
 - Fonts are only loaded once at app launch
 
-Version 0.7.0.3
+### Version 0.7.0.3
 - New optional API V3 config file (for running V2 and V3 concurrently on different ports).
 - Make make_package use Stack.
 
@@ -45,7 +51,7 @@ Version 0.7.0.3
    - Point to LTS-2.19.
    - Fix maccidental removal of lts-3.0 yaml file
 
-Version 0.7.0.0
+### Version 0.7.0.0
 - v3 of AEMO live generation API now supports creating PNGs instead of SVGs to reduce bandwidth and rendering time. APVI services will be converted to use PNGs in the next major version.
 - Use `stack` for building
 - Now compatible with ghc 7.10 - change the symlink for stack.yaml between the two stack.lts-{2.19,3.0}.yaml files
@@ -81,19 +87,19 @@ Version 0.7.0.0
    - Mats Henrikson
    - Alex Mason
 
-Version: 0.6.2.1
+### Version: 0.6.2.1
 - Added percentage of Max Cap calculated value.
 - Change graph dataseries lines from 3 to 2 "pixel" thickness.
 - Chart-diagrams package version changed.
 
-Version: 0.6.2.0
+### Version: 0.6.2.0
 - Add a column to the AEMO CSV output which shows the percentage of current generation compared to the reg cap
 
-Version: 0.6.1.0
+### Version: 0.6.1.0
 Changes:
 - `AEMO-archiver` library became `aemo-archiver`
 
-Version 0.6.0.0
+### Version 0.6.0.0
 Major changes:
 - API now includes version numbers
 
@@ -107,7 +113,7 @@ Other (auto):
    - Alex Mason
 
 
-Version 0.5.0.0
+### Version 0.5.0.0
 
 Major changes:
 - Update to Servant 0.4 - less code with more safety
@@ -132,7 +138,7 @@ Major changes:
 Contributors:
  - Alex Mason
 
-Version 0.4.0.0
+### Version 0.4.0.0
 Major changes:
 - URL Changes:
     - `/aemo/csv` -> `/aemo/csv/all`
