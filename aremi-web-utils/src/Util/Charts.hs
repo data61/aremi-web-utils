@@ -125,7 +125,10 @@ wsChart vss settings =
     case vss of
         [] -> error "empty chart data"
 
-        _ | any (null . snd) vss -> error $ "empty chart series for: " ++ show (map fst . filter (null . snd) $ vss)
+        _ | any (null . snd) vss
+                -> error $ "empty chart series for: " ++ show (map fst . filter (null . snd) $ vss)
+          | any (\(_,(_:xs)) -> null xs) vss
+                -> error $ "cannot make chart of a single data point for: " ++ show (map fst . filter (\(_,(_:xs)) -> null xs) $ vss)
           | otherwise -> toRenderable $ do
             layout_background                             .= solidFillStyle (opaque white)
             layout_foreground                             .= (opaque black)
