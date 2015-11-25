@@ -1,6 +1,8 @@
 flags: {}
 packages:
-- '.'
+- aremi-web-utils
+- aemo-webservice
+- apvi-webservice
 - libraries/AEMO-archiver/
 extra-deps:
 - time-units-1.0.0
@@ -8,4 +10,4 @@ extra-deps:
 - wai-util-0.8
 - http-accept-0.2
 - hslogger-template-2.0.3
-resolver: lts-3.0
+resolver: lts-3.14
