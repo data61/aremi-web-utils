@@ -1,3 +1,9 @@
+## Package split
+
+Packages for `apvi-webservice`, `aemo-webservice` and `aremi-web-utils` have been split out into their own packages. Changelog will remain in this file from this point on, but changes will be in the form `### <component> version a.b.c.d`
+
+Building is the same as before, run `stack build` from this directory.
+
 ### Version 0.8.2.1
 - Change "Most Recent" to "Current" for generation values (leaving "Most Recent Sample Time" as is).
 
