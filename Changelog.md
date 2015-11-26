@@ -1,3 +1,6 @@
+### aremi-web-utils vestion 0.9.0.0
+- Added a check for charts which have a single x/y pair - when x is a `LocalTime` this causes unbounded memory usage until the app crashes. Now we just fail and keep trying until we can actually make a graph.
+
 ## Package split
 
 Packages for `apvi-webservice`, `aemo-webservice` and `aremi-web-utils` have been split out into their own packages. Changelog will remain in this file from this point on, but changes will be in the form `### <component> version a.b.c.d`
