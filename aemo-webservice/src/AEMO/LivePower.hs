@@ -26,9 +26,6 @@ import qualified Data.HashMap.Strict                       as H
 import           Data.Maybe                                (catMaybes,
                                                             fromMaybe)
 
-import           Data.List                                 (sortBy)
-import           Data.Ord                                  (comparing)
-
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
                                                             writeIORef)
@@ -98,7 +95,14 @@ import           Data.String
 import           Control.Monad.Reader                      (runReaderT)
 import           Data.Pool                                 (withResource)
 
-
+import           Data.Acquire                              (with)
+import           Data.ByteString.Builder                   (Builder)
+import           Data.Conduit                              as C
+import qualified Data.Conduit.List                         as CL
+import           Data.Csv.Builder                          as CB
+import           Network.HTTP.Types.Status                 (internalServerError500,
+                                                            ok200)
+import           Network.Wai.Conduit                        (responseLBS, responseSource, Application)
 
 type AEMOLivePower =
     "v2" :> (
@@ -126,6 +130,21 @@ type AEMOLivePower =
             :> QueryParam "endTime" ISOUtcTime
             :> QueryParam "offset" TimeOffsets
             :> Get '[CSV] CsvBS
+        :<|>
+        "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
+    )
+    :<|>
+    "v5" :> (
+        "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS
+        :<|>
+        "png" :> Capture "DUID" Text :> Get '[PNG] PngBS
+        :<|>
+        "duidcsv"
+            :> Capture "DUID" Text
+            :> QueryParam "startTime" ISOUtcTime
+            :> QueryParam "endTime" ISOUtcTime
+            :> QueryParam "offset" TimeOffsets
+            :> Raw
         :<|>
         "csv" :> Capture "tech" Text :> Header "Host" Text :> Get '[CSV] CsvBS
     )
@@ -181,6 +200,7 @@ makeAEMOLivePowerServer api conf env = do
                 {-v2-} (serveSVGLive ref :<|> serveCSVByTech ref)
                 {-v3-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByTech ref)
                 {-v4-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByDUID ref :<|> serveCSVByTech ref)
+                {-v5-} :<|> (serveSVGLive ref :<|> servePNGLive ref :<|> serveCSVByDUIDRaw ref :<|> serveCSVByTech ref)
 
 -- Runs every `update-frequency` minutes (from Config passed to makeAEMOLivePowerServer)
 -- to update the CSVs returned by serveCSVByTech
@@ -352,6 +372,52 @@ serveCSVByDUID ref = \duid mstart mend moff -> do
                 . map (substituteNames duidSubs . toNamedRecord . entityVal)
                 $ allRecs
 
+
+serveCSVByDUIDRaw :: (IsElem SVGPath api, IsElem PNGPath api)
+               => IORef (ALPState api)
+               -> Text
+               -> Maybe ISOUtcTime -> Maybe ISOUtcTime -- start and end times for data
+               -> Maybe TimeOffsets -- Time offset from now, eg "1Y6M" for 1 year and 6 months, supports YMDhm
+               -> Application
+serveCSVByDUIDRaw ref = \duid mstart mend moff _req resp -> do
+    st <- readIORef ref
+    moff' <- case moff of
+        Nothing -> pure Nothing
+        Just offs ->  Just . modifyTime offs <$> getCurrentTime
+
+    let Just pool = st ^. alpConnPool
+        lev = st ^. alpMinLogLevel
+
+        toNamedBuilder :: Entity PowerStationDatum -> Flush Builder
+        toNamedBuilder x = Chunk
+                            $! encodeNamedRecordWith C.defaultEncodeOptions duidCols
+                            . substituteNames duidSubs
+                            . toNamedRecord
+                            . entityVal
+                            $ x
+
+    r <- runAppPool pool lev $ runDB $ selectSourceRes
+            (catMaybes
+                [Just $ PowerStationDatumDuid ==. duid
+                ,(PowerStationDatumSampleTime >=.) <$> (moff' <|> (unISOUtc <$> mstart))
+                ,((PowerStationDatumSampleTime <=.) . unISOUtc) <$> mend
+                ]
+            )
+            [Asc PowerStationDatumSampleTime]
+    case r of
+        Left ex -> resp $ responseLBS internalServerError500 [] $ LC8.pack $ "Something went wrong: " ++ show ex
+        Right asrc -> with asrc $ \src ->
+
+            resp $ responseSource
+                        ok200
+                        [("Content-Type","text/csv")]
+                        (src =$= (do
+                            C.yield $! Chunk $! encodeHeaderWith C.defaultEncodeOptions duidCols
+                            CL.map toNamedBuilder
+                            C.yield Flush
+                            )
+                        )
+
 duidSubs :: [(C.Name,C.Name)]
 duidSubs =
     [("Sample Time (AEST)", "Time (AEST)")
@@ -427,6 +493,7 @@ getLocs ref filts = do
                         E.where_ (dat E.^. PowerStationDatumSampleTime E.==. E.val epsd)
                         pure dat :: E.SqlQuery (E.SqlExpr (Entity PowerStationDatum))
                     return (locs, pows, dats, timeMap)
+                _ -> error "Expected only one maximum time from powerStationDatum"
     case r of
         Left ex -> throw ex
         Right ls -> return ls
@@ -451,13 +518,15 @@ type HasAEMOLinks api =
 
 type SVGPath = ("aemo" :> "v2" :> "svg" :> Capture "DUID" Text :> Get '[SVG] SvgBS)
 type PNGPath = ("aemo" :> "v4" :> "png" :> Capture "DUID" Text :> Get '[PNG] PngBS)
-type DUIDCSVPath = ("aemo" :> "v4":> "duidcsv":> Capture "DUID" Text :> Get '[CSV] CsvBS )
-type DUIDCSVPathWithOffset = ("aemo" :> "v4"
-    :> "duidcsv"
-            :> Capture "DUID" Text
-            :> QueryParam "offset" TimeOffsets
-            :> Get '[CSV] CsvBS
-            )
+type DUIDCSVPath = ("aemo" :> "v5":> "duidcsv":> Capture "DUID" Text :> Raw )
+type DUIDCSVPathWithOffset =
+    ("aemo"
+        :> "v5"
+        :> "duidcsv"
+        :> Capture "DUID" Text
+        :> QueryParam "offset" TimeOffsets
+        :> Raw
+    )
 
 emptyT :: Text
 emptyT = "-"

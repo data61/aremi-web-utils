@@ -92,6 +92,10 @@ executable aemo-webservice
                        , mtl
                        , esqueleto
                        , aremi-web-utils
+                       , conduit
+                       , wai-conduit
+                       , http-types
+                       , resourcet
 
   -- Directories containing source files.
   hs-source-dirs:      src
