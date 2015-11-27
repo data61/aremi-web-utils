@@ -109,7 +109,7 @@ main = do
         Left err -> errorM err
         Right serv -> do
             mids <- makeMiddleware config
-            port <- lookupDefault 3000 config "port"
+            port <- lookupDefault 3000 config "apvi.port"
             run port $ mids $ serve appProxy serv
 
 
