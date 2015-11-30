@@ -1,1 +1,8 @@
-stack-lts-3.0.yaml
+flags: {}
+packages:
+- '.'
+extra-deps:
+- time-units-1.0.0
+- lens-datetime-0.2.1
+- hslogger-template-2.0.3
+resolver: lts-3.14
