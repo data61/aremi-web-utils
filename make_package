@@ -12,15 +12,18 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 DESCRIBE=$(git describe)
-INSTALL_PATH='.stack-work/install/x86_64-*/lts-*/7.*/bin'
+DIST='dist'
+TARGET="target/apvi-webservice-${DESCRIBE}.tar.gz"
 
+rm -rf dist && mkdir -p dist
 stack clean
-stack build
+stack build --copy-bins
 
 mkdir -p target
 tar czf target/apvi-webservice-${DESCRIBE}.tar.gz \
-  --absolute-names \
   Changelog.md \
   fonts \
-  -C ${INSTALL_PATH} \
-    apvi-webservice
+  -C ${DIST} \
+    apvi-webservice \
+    aemo-webservice \
+&& echo "Built package ${TARGET}"

@@ -11,3 +11,4 @@ extra-deps:
 - http-accept-0.2
 - hslogger-template-2.0.3
 resolver: lts-3.14
+local-bin-path: dist
