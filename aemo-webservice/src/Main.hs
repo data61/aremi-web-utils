@@ -98,8 +98,7 @@ main = do
     h' <- fileHandler allLog HSL.DEBUG
     h <- return $ setFormatter h' (simpleLogFormatter "[$time] $prio $loggername: $msg")
     HSL.updateGlobalLogger "Main" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
-    HSL.updateGlobalLogger "APVI.LiveSolar" (HSL.addHandler h . HSL.setLevel HSL.DEBUG)
-    infoM "apvi-webservice launch"
+    infoM "aemo-webservice launch"
 
     appServ <- runEitherT (appServer config)
 
@@ -107,7 +106,7 @@ main = do
         Left err -> errorM err
         Right serv -> do
             mids <- makeMiddleware config
-            port <- lookupDefault 3000 config "aemo.port"
+            port <- lookupDefault 3000 config "port"
             run port $ mids $ serve appProxy serv
 
 
