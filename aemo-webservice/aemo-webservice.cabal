@@ -50,7 +50,7 @@ executable aemo-webservice
   -- .hs or .lhs file containing the Main module.
   main-is:             Main.hs
 
-  ghc-options:         -threaded
+  ghc-options:         -threaded -with-rtsopts=-I1
 
   -- Modules included in this executable, other than Main.
   other-modules:     AEMO.LivePower
