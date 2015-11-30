@@ -63,7 +63,7 @@ appServer ::Config -> EitherT String IO (Server App)
 appServer conf = do
     fontSelector <- liftIO $ loadFonts conf
     let !env = createEnv bitmapAlignmentFns 500 300 fontSelector
-    ls <- EitherT $ makeLiveSolarServer (subconfig "apvi" conf) env
+    ls <- EitherT $ makeLiveSolarServer conf env
     return $ ls :<|> serveDirectory "static"
     where
         _addCorsHeader :: Middleware
@@ -92,7 +92,6 @@ main = do
 
     (config,_tid) <- autoReload (autoConfig {onError = print})
                         [ C.Required "/etc/aremi/apvi-webservice.conf"
-                        , C.Optional "/etc/aremi/apvi-webservice-v3.conf"
                         ]
 
     -- M.forkServer "localhost" 8000

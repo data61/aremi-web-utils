@@ -1,4 +1,7 @@
-### aremi-web-utils vestion 0.9.0.0
+### apvi-webservice version 0.9.0.0
+- Make a best effort attempt to make new charts if possible - if we can't make new charts, the old ones will remain available.
+
+### aremi-web-utils version 0.9.0.0
 - Added a check for charts which have a single x/y pair - when x is a `LocalTime` this causes unbounded memory usage until the app crashes. Now we just fail and keep trying until we can actually make a graph.
 
 ## Package split
