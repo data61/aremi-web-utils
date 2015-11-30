@@ -62,7 +62,7 @@ appServer ::Config -> EitherT String IO (Server App)
 appServer conf = do
     fontSelector <- liftIO $ loadFonts conf
     let !env = createEnv bitmapAlignmentFns 500 300 fontSelector
-    lp <- EitherT $ makeAEMOLivePowerServer appProxy (subconfig "aemo" conf) env
+    lp <- EitherT $ makeAEMOLivePowerServer appProxy conf env
     return $ lp :<|> serveDirectory "static"
     where
         _addCorsHeader :: Middleware
@@ -90,8 +90,7 @@ main = do
     getNumProcessors >>= setNumCapabilities
 
     (config,_tid) <- autoReload (autoConfig {onError = print})
-                        [ C.Required "/etc/aremi/apvi-webservice.conf"
-                        , C.Optional "/etc/aremi/apvi-webservice-v3.conf"
+                        [ C.Required "/etc/aremi/aemo-webservice.conf"
                         ]
 
     -- M.forkServer "localhost" 8000
