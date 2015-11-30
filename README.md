@@ -1,9 +1,6 @@
-# aremi-webservices
+#  `aremi-web-utils`: 
 
-Consists of three packages:
- - `aremi-web-utils`: common code used in both `aemo-webservice` and `apvi-webservice`
- - `aemo-webservice`: which accesses data stores in a postgis database relating to AEMO live power generation for use on AREMI.
- - `apvi-webservice`: Accesses data from APVI to produce CSVs and charts of solar energy production for use on AREMI.
+Common code used in both `aemo-webservice` and `apvi-webservice`
 
 ## Building
 1. Follow the instructions on http://docs.haskellstack.org/en/stable/README.html on how to install `stack`
