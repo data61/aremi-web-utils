@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -6,9 +7,9 @@
 {-# LANGUAGE PolyKinds         #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeOperators     #-}
-{-# LANGUAGE CPP               #-}
 
 
 module APVI.LiveSolar (
@@ -35,6 +36,7 @@ module APVI.LiveSolar (
 import           Data.List                                 (sortBy)
 import           Data.Monoid                               ((<>))
 import           Data.Ord                                  (comparing)
+import Data.Maybe (catMaybes)
 
 import           Control.Applicative
 import           Control.Arrow                             (second)
@@ -123,7 +125,7 @@ import           Util.Periodic
 import           Util.Types
 import           Util.Web
 
-import Text.Printf (printf)
+import           Text.Printf                               (printf)
 
 
 $(deriveLoggers "HSL" [HSL.DEBUG, HSL.ERROR, HSL.WARNING, HSL.INFO])
@@ -272,11 +274,11 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                         0
                                         (allContPngs ++ allPerfPngs)
 
-                    debugM $ "Total PNG size: " ++ show pngSize
+                    debugM $ "Total new PNG size: " ++ show pngSize
 
                     let !newState = current
-                            & contributionGraphs    .~ H.fromList allContPngs
-                            & performanceGraphs     .~ H.fromList allPerfPngs
+                            & contributionGraphs    %~ H.union (H.fromList allContPngs)
+                            & performanceGraphs     %~ H.union (H.fromList allPerfPngs)
                             & performanceCSV        .~ Just perfCSV
                             & contributionCSV       .~ Just contCSV
                             & performanceGraphJSON  .~ perfJSON
@@ -305,22 +307,30 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                       | Just (utct,d) <- series])
                                | (name,series) <- allStates]
 
+                allFiltered = filter (hasTwo . snd) allCorrected
+
                 titleStr :: String
                 titleStr = "All states " ++ T.unpack title
 
                 allTitle :: Text
                 allTitle = T.pack $ formatTime defaultTimeLocale (titleStr ++ " (%%) %F %X %Z") fetched
 
+                hasTwo :: [a] -> Bool
+                hasTwo (_:_:_) = True
+                hasTwo _       = False
+
                 -- allChart :: Renderable ()
-                allChart = wsChart allCorrected $ do
+                allChart = wsChart allFiltered $ do
                                 layout_title .= (T.unpack allTitle)
                                 layout_y_axis . laxis_title .= "(%)"
                                 layout_x_axis . laxis_title .= timeZoneName tz
+            !allpngs <- if null allFiltered
+                then return Nothing
+                else do
+                    debugM $ "Rendering " ++ titleStr ++ " PNGs"
+                    allpngs' <- {-# SCC "renderCharts.renderImage(all)" #-} liftIO $ renderImage env 500 300 allChart
+                    return $! Just $! ("all",) $! renderToPng allpngs'
 
-
-            debugM $ "Rendering " ++ titleStr ++ " PNGs"
-            allpngs' <- {-# SCC "renderCharts.renderImage(all)" #-} liftIO $ renderImage env 500 300 allChart
-            let !allpngs = renderToPng allpngs'
 
             -- spngs <- liftIO $ flip mapConcurrently states $ \(sname,_) -> do
             spngs <- liftIO $ flip mapM states $ \(sname,_) -> do
@@ -333,10 +343,13 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                                     layout_title .= (T.unpack fullTitle)
                                     layout_y_axis . laxis_title .= "(%)"
                                     layout_x_axis . laxis_title .= timeZoneName tz
-
-                    spng' <- {-# SCC "renderCharts.renderImage(state)" #-} renderImage env 500 300 chart
-                    let !spng = renderToPng spng'
-                    return (sname, spng)
+                    if hasTwo plotVals
+                        then do
+                            spng' <- {-# SCC "renderCharts.renderImage(state)" #-} renderImage env 500 300 chart
+                            let !spng = renderToPng spng'
+                            return $ Just (sname, spng)
+                        else
+                            return Nothing
             debugM $ "Done rendering " ++ titleStr ++ " PNGs"
 
 
@@ -346,7 +359,7 @@ updateRef retries ref = flip catch (\e -> (warningM  . show $ (e :: SomeExceptio
                     ((Just "ts") : [val ^? key "ts" | val <- vals]) :
                     [Just (A.toJSON col) : [ val ^? key col | val <- vals] | col <- drop 1 cols]
 
-            return $ (("all",allpngs):spngs, jsonData2, renderCSVs title allStates)
+            return $ (catMaybes (allpngs:spngs), jsonData2, renderCSVs title allStates)
 
         renderCSVs :: Text -> [(Text,[Maybe (UTCTime,Double)])] -> (Text -> CsvBS)
         renderCSVs title allStates =
