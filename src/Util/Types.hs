@@ -3,6 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Util.Types
@@ -28,10 +29,23 @@ import           Data.ByteString.Lazy     (ByteString)
 import qualified Data.ByteString.Lazy     as BSL
 
 import qualified Data.Text                as T
+import qualified Data.Text.Lazy           as TL
 
 import           Network.HTTP.Media       ((//))
 import           Servant.API.ContentTypes
 import           Servant.Common.Text
+import           Servant.Docs
+
+import           Text.Blaze.Html                           (Html)
+import qualified Text.Blaze.Html5                          as H
+import           Text.Blaze.Html5.Attributes               (charset, name, content, rel, href)
+
+import qualified Text.Markdown                             as MD
+
+
+import Data.Proxy
+
+import Data.Default
 
 import           Data.Time.Clock          (UTCTime)
 #if MIN_VERSION_time(1,5,0)
@@ -147,3 +161,24 @@ modifyTime (TimeOffsets ts) t = t & flexDT %~ adjust where
         D -> days
         H -> hours
         Mn -> minutes
+
+-- API Documentation utilities
+
+
+newtype APIDoc = APIDoc Html deriving (H.ToMarkup)
+
+instance ToSample APIDoc APIDoc where
+    toSample _ = Just (APIDoc "(This page)")
+
+
+docsHtml :: HasDocs api => T.Text -> Proxy api -> APIDoc
+docsHtml title api = APIDoc $ do
+    H.docTypeHtml $ do
+        H.head $ do
+            H.meta H.! charset "utf-8"
+            H.meta H.! name "viewport" H.! content "width=device-width, initial-scale=1.0"
+            H.link H.! rel "stylesheet" H.! href "//writ.cmcenroe.me/1.0.2/writ.min.css"
+        H.head $
+            H.main $ do
+                H.h1 (H.text title) --
+                MD.markdown def $ TL.pack $ markdown $ docs api

@@ -1,3 +1,6 @@
+### aremi-web-utils 0.9.1.0
+- Add helpers for making API documentation for services
+
 ### apvi-webservice version 0.9.0.0
 - Make a best effort attempt to make new charts if possible - if we can't make new charts, the old ones will remain available.
 
