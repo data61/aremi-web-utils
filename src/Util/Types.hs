@@ -22,6 +22,8 @@ module Util.Types
     , TimeOffset(..)
     , TimePeriod(..)
     , modifyTime
+    , APIDoc(..)
+    , docsHtml
     ) where
 
 import qualified Data.ByteString          as S
