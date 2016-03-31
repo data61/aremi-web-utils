@@ -24,6 +24,8 @@ module Util.Types
     , modifyTime
     , APIDoc(..)
     , docsHtml
+    , FontConfig(..)
+    , fontPath
     ) where
 
 import qualified Data.ByteString          as S
