@@ -148,4 +148,3 @@ wsChart vss settings =
                     plot_lines_values .= [ vs ]
                     plot_lines_style . line_color .= colour
                     plot_lines_style . line_width .= 2
-
