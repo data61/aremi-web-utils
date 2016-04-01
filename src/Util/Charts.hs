@@ -47,7 +47,8 @@ instance ToJSON FontConfig where
 pFontConfig :: MParser FontConfig
 pFontConfig = id
     <$< fontDir .:: strOption
-        % long "fontsdir"
+        % short 'F'
+        <> long "fontsdir"
         <> help "Directory containing SVG fonts for"
 
 defaultFontConfig :: FontConfig
