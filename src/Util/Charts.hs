@@ -42,11 +42,11 @@ instance FromJSON (FontConfig -> FontConfig) where
 
 instance ToJSON FontConfig where
   toJSON a = object
-      [ "fontdir" C..= _fontPath a]
+      [ "fontdir" C..= _fontDir a]
 
 pFontConfig :: MParser FontConfig
 pFontConfig = id
-    <$< fontPath .:: strOption
+    <$< fontDir .:: strOption
         % long "fontsdir"
         <> help "Directory containing SVG fonts for"
 
@@ -86,7 +86,7 @@ loadFonts fconf = do
      , sansRB
      , sansRBI
      , sansRI
-     ] <- mapConcurrently (F.loadFont . (_fontPath fconf ++))
+     ] <- mapConcurrently (F.loadFont . (_fontDir fconf ++))
                     [ "/SourceSansPro_R.svg"
                     , "/SourceSansPro_RB.svg"
                     , "/SourceSansPro_RBI.svg"
