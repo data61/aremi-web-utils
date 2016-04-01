@@ -34,18 +34,18 @@ import           Configuration.Utils hiding ((.=))
 import qualified Configuration.Utils as C
 -- import Control.Lens
 
-newtype FontConfig = FontConfig {_fontPath :: String} deriving (Show, Eq)
+newtype FontConfig = FontConfig {_fontDir :: String} deriving (Show, Eq)
 $(makeLenses ''FontConfig)
 
 instance FromJSON (FontConfig -> FontConfig) where
-  parseJSON = withObject "FontConfig" $ \o -> id <$< fontPath ..: "fontPath" % o
+  parseJSON = withObject "FontConfig" $ \o -> id <$< fontDir ..: "fontdir" % o
 
 instance ToJSON FontConfig where
   toJSON a = object
-      [ "fontPath" C..= _fontPath a]
+      [ "fontdir" C..= _fontPath a]
 
-pAuth :: MParser FontConfig
-pAuth = id
+pFontConfig :: MParser FontConfig
+pFontConfig = id
     <$< fontPath .:: strOption
         % long "fontsdir"
         <> help "Directory containing SVG fonts for"
