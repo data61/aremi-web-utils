@@ -1,3 +1,6 @@
+### aremi-web-utils 0.10.0.0
+- Add types for configuring fonts location, using configuration-tools
+
 ### aremi-web-utils 0.9.1.0
 - Add helpers for making API documentation for services
 
